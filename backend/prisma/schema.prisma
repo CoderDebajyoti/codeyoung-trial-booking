@@ -33,6 +33,7 @@ model Parent {
   id        String    @id @default(uuid())
   name      String
   email     String
+  phone     String?
   timeZone  String    // e.g. "America/New_York"
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -47,6 +48,7 @@ model Booking {
   id             String        @id @default(uuid())
   parentId       String
   mentorId       String
+  course         String?       @default("Coding & STEM Trial")
   startAt        DateTime      // Stored as UTC timestamp
   endAt          DateTime      // Stored as UTC timestamp (startAt + 30 mins)
   parentTimeZone String        // e.g. "America/New_York"
@@ -60,7 +62,46 @@ model Booking {
   parent         Parent        @relation(fields: [parentId], references: [id], onDelete: Cascade)
   mentor         Mentor        @relation(fields: [mentorId], references: [id], onDelete: Cascade)
 
+  notifications  Notification[]
+
   @@index([mentorId, status, startAt, endAt])
   @@index([mentorId, startAt])
   @@map("bookings")
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMATION_PARENT
+  BOOKING_NOTIFICATION_MENTOR
+  CLASS_REMINDER_PARENT
+  CLASS_REMINDER_MENTOR
+}
+
+enum NotificationStatus {
+  PENDING
+  ACCEPTED
+  FAILED
+}
+
+model Notification {
+  id            String             @id @default(uuid())
+  bookingId     String
+  type          NotificationType
+  recipient     String
+  recipientRole String             // "parent" | "mentor"
+  subject       String
+  content       String             // text body
+  htmlContent   String?            // HTML body
+  status        NotificationStatus @default(PENDING)
+  scheduledFor  DateTime           @default(now())
+  sentAt        DateTime?
+  attemptCount  Int                @default(0)
+  lastError     String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  booking       Booking            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, type])
+  @@index([status, scheduledFor])
+  @@map("notifications")
 }

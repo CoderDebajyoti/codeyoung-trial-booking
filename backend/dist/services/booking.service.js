@@ -1,0 +1,251 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.bookingService = exports.BookingService = exports.SlotUnavailableError = void 0;
+const prisma_js_1 = require("../lib/prisma.js");
+const mentor_repository_js_1 = require("../repositories/mentor.repository.js");
+const parent_repository_js_1 = require("../repositories/parent.repository.js");
+const booking_repository_js_1 = require("../repositories/booking.repository.js");
+const email_service_js_1 = require("./email.service.js");
+const dateUtils_js_1 = require("../lib/dateUtils.js");
+const date_fns_1 = require("date-fns");
+class SlotUnavailableError extends Error {
+    alternativeSlots;
+    constructor(message, alternativeSlots = []) {
+        super(message);
+        this.name = 'SlotUnavailableError';
+        this.alternativeSlots = alternativeSlots;
+    }
+}
+exports.SlotUnavailableError = SlotUnavailableError;
+class BookingService {
+    /**
+     * Find available start slots for a parent's requested local date and time zone.
+     */
+    async getAvailableSlots(parentLocalDateStr, parentTimeZone) {
+        if (!(0, dateUtils_js_1.isValidTimeZone)(parentTimeZone)) {
+            throw new Error(`Invalid IANA time zone: ${parentTimeZone}`);
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(parentLocalDateStr)) {
+            throw new Error(`Invalid date format: ${parentLocalDateStr}. Expected YYYY-MM-DD.`);
+        }
+        const canonicalParentTz = (0, dateUtils_js_1.normalizeTimeZone)(parentTimeZone);
+        const mentors = await mentor_repository_js_1.mentorRepository.findAllActive();
+        const { startUtc, endUtc } = (0, dateUtils_js_1.getLocalDayUtcRange)(parentLocalDateStr, canonicalParentTz);
+        const availableSlots = [];
+        // Evaluate 30-minute interval slots from startUtc to endUtc
+        let currentSlotStart = new Date(startUtc);
+        while (currentSlotStart < endUtc) {
+            const currentSlotEnd = (0, date_fns_1.addMinutes)(currentSlotStart, dateUtils_js_1.CLASS_DURATION_MINUTES);
+            // Check how many mentors can take this slot
+            let eligibleMentorsCount = 0;
+            for (const mentor of mentors) {
+                if ((0, dateUtils_js_1.isWithinMentorWorkingHours)(currentSlotStart, currentSlotEnd, mentor)) {
+                    // Check overlap
+                    const overlaps = await booking_repository_js_1.bookingRepository.findOverlappingConfirmedBookings(mentor.id, currentSlotStart, currentSlotEnd);
+                    if (overlaps.length === 0) {
+                        // Check daily limit for mentor's local date
+                        const mentorLocalDate = (0, dateUtils_js_1.getLocalDateString)(currentSlotStart, mentor.timeZone);
+                        const { startUtc: mentorDayStart, endUtc: mentorDayEnd } = (0, dateUtils_js_1.getLocalDayUtcRange)(mentorLocalDate, mentor.timeZone);
+                        const dailyCount = await booking_repository_js_1.bookingRepository.countMentorConfirmedInUtcRange(mentor.id, mentorDayStart, mentorDayEnd);
+                        if (dailyCount < 2) {
+                            eligibleMentorsCount++;
+                        }
+                    }
+                }
+            }
+            if (eligibleMentorsCount > 0) {
+                availableSlots.push({
+                    startUtc: currentSlotStart.toISOString(),
+                    endUtc: currentSlotEnd.toISOString(),
+                    parentLocalDate: parentLocalDateStr,
+                    parentLocalTime: (0, dateUtils_js_1.formatLocalTime)(currentSlotStart, canonicalParentTz, 'HH:mm'),
+                    parentTimeZone: canonicalParentTz,
+                    availableMentorsCount: eligibleMentorsCount,
+                });
+            }
+            currentSlotStart = (0, date_fns_1.addMinutes)(currentSlotStart, 30);
+        }
+        return availableSlots;
+    }
+    /**
+     * Find alternative slots (e.g. in the next 3 days) when a requested slot is unavailable.
+     */
+    async findAlternativeSlots(parentLocalDateStr, parentTimeZone, limit = 4) {
+        const alternatives = [];
+        const dateObj = new Date(parentLocalDateStr);
+        for (let offset = 0; offset <= 2; offset++) {
+            const checkDate = (0, dateUtils_js_1.getLocalDateString)((0, date_fns_1.addDays)(dateObj, offset), parentTimeZone);
+            const slots = await this.getAvailableSlots(checkDate, parentTimeZone);
+            for (const slot of slots) {
+                alternatives.push(slot);
+                if (alternatives.length >= limit)
+                    return alternatives;
+            }
+        }
+        return alternatives;
+    }
+    /**
+     * Concurrency-safe atomic booking creation with fair mentor assignment and 2-classes daily capacity rule.
+     */
+    async createBooking(input) {
+        if (!(0, dateUtils_js_1.isValidTimeZone)(input.parentTimeZone)) {
+            throw new Error(`Invalid IANA parent time zone: ${input.parentTimeZone}`);
+        }
+        const canonicalParentTz = (0, dateUtils_js_1.normalizeTimeZone)(input.parentTimeZone);
+        const startUtc = (0, dateUtils_js_1.parseRequestedStart)(input.startAt, canonicalParentTz);
+        const endUtc = (0, date_fns_1.addMinutes)(startUtc, dateUtils_js_1.CLASS_DURATION_MINUTES);
+        // 1. Idempotency Check: if idempotency key was previously processed, return existing booking
+        if (input.idempotencyKey) {
+            const existing = await booking_repository_js_1.bookingRepository.findByIdempotencyKey(input.idempotencyKey);
+            if (existing) {
+                return this.formatBookingResponse(existing);
+            }
+        }
+        // 2. Identify candidate mentors who are generally working during this slot
+        const allMentors = await mentor_repository_js_1.mentorRepository.findAllActive();
+        const candidateMentors = allMentors.filter((m) => (0, dateUtils_js_1.isWithinMentorWorkingHours)(startUtc, endUtc, m));
+        if (candidateMentors.length === 0) {
+            const parentDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, canonicalParentTz);
+            const alternatives = await this.findAlternativeSlots(parentDate, canonicalParentTz);
+            throw new SlotUnavailableError('No mentors are scheduled to work at the requested time.', alternatives);
+        }
+        // 3. Execute in transaction (or in-memory transactional logic if DB is offline)
+        const candidateIds = candidateMentors.map((m) => m.id);
+        const executeAssignmentLogic = async (tx) => {
+            // In-transaction idempotency verification
+            if (input.idempotencyKey) {
+                const existingTx = await booking_repository_js_1.bookingRepository.findByIdempotencyKey(input.idempotencyKey, tx);
+                if (existingTx) {
+                    return existingTx;
+                }
+            }
+            // Explicitly lock candidate mentor records in deterministic ID order
+            if (tx) {
+                await mentor_repository_js_1.mentorRepository.lockMentorsByIds(tx, candidateIds);
+            }
+            // Evaluate eligibility and current daily load inside the transaction
+            const mentorLoads = [];
+            for (const mentor of candidateMentors) {
+                // Double-check overlapping bookings inside transaction
+                const overlaps = await booking_repository_js_1.bookingRepository.findOverlappingConfirmedBookings(mentor.id, startUtc, endUtc, tx);
+                if (overlaps.length > 0) {
+                    continue; // Mentor has a conflicting booking
+                }
+                // Calculate mentor's local calendar day window
+                const mentorLocalDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, mentor.timeZone);
+                const { startUtc: mentorDayStart, endUtc: mentorDayEnd } = (0, dateUtils_js_1.getLocalDayUtcRange)(mentorLocalDate, mentor.timeZone);
+                const dailyCount = await booking_repository_js_1.bookingRepository.countMentorConfirmedInUtcRange(mentor.id, mentorDayStart, mentorDayEnd, tx);
+                if (dailyCount < 2) {
+                    mentorLoads.push({ mentor, dailyCount });
+                }
+            }
+            if (mentorLoads.length === 0) {
+                return null; // All candidates are busy or at capacity
+            }
+            // Fair Assignment Algorithm:
+            // Sort primarily by fewest classes assigned on that mentor-local day (ascending),
+            // tie-break deterministically by mentor ID (ascending).
+            mentorLoads.sort((a, b) => {
+                if (a.dailyCount !== b.dailyCount) {
+                    return a.dailyCount - b.dailyCount;
+                }
+                return a.mentor.id.localeCompare(b.mentor.id);
+            });
+            const selectedMentor = mentorLoads[0].mentor;
+            // Find or create parent
+            const parent = await parent_repository_js_1.parentRepository.findOrCreate({
+                name: input.parentName,
+                email: input.parentEmail,
+                phone: input.parentPhone,
+                timeZone: canonicalParentTz,
+            }, tx);
+            // Generate dummy demo class meeting URL
+            const demoClassUrl = `https://meet.codeyoung.com/trial/${Math.random().toString(36).substring(2, 9)}`;
+            // Create confirmed booking
+            const newBooking = await booking_repository_js_1.bookingRepository.create({
+                parentId: parent.id,
+                mentorId: selectedMentor.id,
+                course: input.course || 'Coding & STEM Trial',
+                startAt: startUtc,
+                endAt: endUtc,
+                parentTimeZone: canonicalParentTz,
+                mentorTimeZone: (0, dateUtils_js_1.normalizeTimeZone)(selectedMentor.timeZone),
+                demoClassUrl,
+                idempotencyKey: input.idempotencyKey || null,
+            }, tx);
+            return newBooking;
+        };
+        let bookingResult = null;
+        try {
+            bookingResult = await prisma_js_1.prisma.$transaction(async (tx) => {
+                return executeAssignmentLogic(tx);
+            });
+        }
+        catch {
+            // Fallback for in-memory execution when database is offline
+            bookingResult = await executeAssignmentLogic();
+        }
+        if (!bookingResult) {
+            const parentDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, input.parentTimeZone);
+            const alternatives = await this.findAlternativeSlots(parentDate, input.parentTimeZone);
+            throw new SlotUnavailableError('All eligible mentors are fully booked or at maximum daily capacity for this time slot.', alternatives);
+        }
+        // Trigger testable email notification asynchronously
+        email_service_js_1.emailService
+            .sendBookingConfirmation({
+            bookingId: bookingResult.id,
+            parentEmail: bookingResult.parent.email,
+            parentName: bookingResult.parent.name,
+            parentTimeZone: bookingResult.parentTimeZone,
+            mentorEmail: bookingResult.mentor.email,
+            mentorName: bookingResult.mentor.name,
+            mentorTimeZone: bookingResult.mentorTimeZone,
+            course: bookingResult.course || input.course || 'Coding & STEM Trial',
+            startAtUtc: bookingResult.startAt,
+            endAtUtc: bookingResult.endAt,
+            demoClassUrl: bookingResult.demoClassUrl,
+        })
+            .catch((err) => {
+            console.error('Failed to dispatch email confirmation:', err);
+        });
+        return this.formatBookingResponse(bookingResult);
+    }
+    async getBookingById(id) {
+        const booking = await booking_repository_js_1.bookingRepository.findById(id);
+        if (!booking) {
+            throw new Error(`Booking not found with ID: ${id}`);
+        }
+        return this.formatBookingResponse(booking);
+    }
+    formatBookingResponse(booking) {
+        return {
+            id: booking.id,
+            status: booking.status,
+            course: booking.course || 'Coding & STEM Trial',
+            demoClassUrl: booking.demoClassUrl,
+            startAtUtc: booking.startAt.toISOString(),
+            endAtUtc: booking.endAt.toISOString(),
+            durationMinutes: dateUtils_js_1.CLASS_DURATION_MINUTES,
+            parent: {
+                id: booking.parent.id,
+                name: booking.parent.name,
+                email: booking.parent.email,
+                phone: booking.parent.phone,
+                timeZone: booking.parentTimeZone,
+                localStartTime: (0, dateUtils_js_1.formatLocalTime)(booking.startAt, booking.parentTimeZone, 'yyyy-MM-dd HH:mm:ss (zzz)'),
+                localEndTime: (0, dateUtils_js_1.formatLocalTime)(booking.endAt, booking.parentTimeZone, 'HH:mm:ss (zzz)'),
+            },
+            mentor: {
+                id: booking.mentor.id,
+                name: booking.mentor.name,
+                email: booking.mentor.email,
+                timeZone: booking.mentorTimeZone,
+                localStartTime: (0, dateUtils_js_1.formatLocalTime)(booking.startAt, booking.mentorTimeZone, 'yyyy-MM-dd HH:mm:ss (zzz)'),
+                localEndTime: (0, dateUtils_js_1.formatLocalTime)(booking.endAt, booking.mentorTimeZone, 'HH:mm:ss (zzz)'),
+            },
+            createdAt: booking.createdAt.toISOString(),
+        };
+    }
+}
+exports.BookingService = BookingService;
+exports.bookingService = new BookingService();

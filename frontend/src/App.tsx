@@ -1,106 +1,162 @@
 import { useState, useEffect } from 'react';
-import { Clock, Globe, ShieldCheck, Sparkles, UserCheck } from 'lucide-react';
+import { Navbar } from './components/Navbar';
+import { ParentDetailsForm, ParentFormData } from './components/ParentDetailsForm';
+import { SlotPicker } from './components/SlotPicker';
+import { BookingConfirmation } from './components/BookingConfirmation';
+import { MentorScheduleView } from './components/MentorScheduleView';
+import { getDetectedDeviceTimeZone } from './lib/timezones';
+import { BookingResponseData } from './lib/api';
+import { Check, User, Calendar, Sparkles } from 'lucide-react';
 
 export function App() {
-  const [backendHealth, setBackendHealth] = useState<string>('Checking...');
-  const [detectedTz, setDetectedTz] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'booking' | 'mentor-schedule'>('booking');
+  const [bookingStep, setBookingStep] = useState<1 | 2 | 3>(1);
+
+  // Form State
+  const [parentData, setParentData] = useState<ParentFormData>({
+    parentName: '',
+    parentEmail: '',
+    parentPhone: '',
+    course: 'Coding & Game Design (Scratch / Roblox)',
+    parentTimeZone: getDetectedDeviceTimeZone(),
+  });
+
+  const [confirmedBooking, setConfirmedBooking] = useState<BookingResponseData | null>(null);
 
   useEffect(() => {
-    try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      setDetectedTz(tz || 'UTC');
-    } catch {
-      setDetectedTz('UTC');
-    }
-
-    // Ping backend health
-    fetch('/api/health')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.status === 'ok') {
-          setBackendHealth('Connected (Healthy)');
-        } else {
-          setBackendHealth('Unexpected Response');
-        }
-      })
-      .catch(() => {
-        setBackendHealth('Offline (Dev Server not reachable)');
-      });
+    const tz = getDetectedDeviceTimeZone();
+    setParentData((prev) => ({
+      ...prev,
+      parentTimeZone: prev.parentTimeZone || tz,
+    }));
   }, []);
 
+  const handleParentDetailsSubmit = (data: ParentFormData) => {
+    setParentData(data);
+    setBookingStep(2);
+  };
+
+  const handleBookingSuccess = (booking: BookingResponseData) => {
+    setConfirmedBooking(booking);
+    setBookingStep(3);
+  };
+
+  const handleBookAnother = () => {
+    setConfirmedBooking(null);
+    setBookingStep(1);
+  };
+
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-slate-50 text-slate-900">
-      {/* Top Navigation */}
-      <header className="border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold shadow-md shadow-blue-500/20">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-blue-700 to-indigo-600 bg-clip-text text-transparent">
-                Codeyoung
-              </span>
-              <span className="ml-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                Trial Class System
-              </span>
-            </div>
+    <div className="min-h-screen flex flex-col justify-between bg-slate-50/70 text-slate-900 selection:bg-blue-100 selection:text-blue-900">
+      {/* Top Navbar */}
+      <Navbar
+        activeTab={activeTab}
+        onTabChange={(tab) => setActiveTab(tab)}
+        selectedTimeZone={parentData.parentTimeZone}
+      />
+
+      {/* Main Content Area */}
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12 w-full flex-1">
+        {activeTab === 'booking' && (
+          <div className="space-y-8">
+            {/* Step Progress Breadcrumb */}
+            {bookingStep < 3 && (
+              <div className="max-w-lg mx-auto flex items-center justify-between relative">
+                {/* Connecting Bar */}
+                <div className="absolute top-1/2 left-8 right-8 -translate-y-1/2 h-0.5 bg-slate-200 z-0" />
+                <div
+                  className={`absolute top-1/2 left-8 -translate-y-1/2 h-0.5 bg-blue-600 transition-all duration-300 z-0 ${
+                    bookingStep === 2 ? 'w-1/2' : 'w-0'
+                  }`}
+                />
+
+                {/* Step 1 Node */}
+                <div className="relative z-10 flex flex-col items-center gap-1.5">
+                  <div
+                    className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-xs ${
+                      bookingStep === 1
+                        ? 'bg-blue-600 text-white ring-4 ring-blue-100'
+                        : 'bg-emerald-600 text-white'
+                    }`}
+                  >
+                    {bookingStep > 1 ? <Check className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                  </div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                    1. Details
+                  </span>
+                </div>
+
+                {/* Step 2 Node */}
+                <div className="relative z-10 flex flex-col items-center gap-1.5">
+                  <div
+                    className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-xs ${
+                      bookingStep === 2
+                        ? 'bg-blue-600 text-white ring-4 ring-blue-100'
+                        : 'bg-white border-2 border-slate-300 text-slate-400'
+                    }`}
+                  >
+                    <Calendar className="w-4 h-4" />
+                  </div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                    2. Date & Time
+                  </span>
+                </div>
+
+                {/* Step 3 Node */}
+                <div className="relative z-10 flex flex-col items-center gap-1.5">
+                  <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs bg-white border-2 border-slate-300 text-slate-400 shadow-xs">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    3. Confirmed
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Screen A: Parent Details Form */}
+            {bookingStep === 1 && (
+              <ParentDetailsForm
+                initialData={parentData}
+                onSubmit={handleParentDetailsSubmit}
+              />
+            )}
+
+            {/* Screen B: Slot Picker */}
+            {bookingStep === 2 && (
+              <SlotPicker
+                parentData={parentData}
+                onBack={() => setBookingStep(1)}
+                onBookingSuccess={handleBookingSuccess}
+              />
+            )}
+
+            {/* Screen C: Booking Confirmation */}
+            {bookingStep === 3 && confirmedBooking && (
+              <BookingConfirmation
+                booking={confirmedBooking}
+                onBookAnother={handleBookAnother}
+              />
+            )}
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
-              <Globe className="w-3.5 h-3.5 text-blue-600" />
-              <span>{detectedTz || 'Detecting timezone...'}</span>
-            </div>
-          </div>
-        </div>
-      </header>
+        )}
 
-      {/* Hero / Placeholder container for the booking stages */}
-      <main className="max-w-4xl mx-auto px-4 py-12 sm:px-6 w-full flex-1 flex flex-col items-center justify-center text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold mb-6">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          Production-Ready Architecture Initialized
-        </div>
-
-        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4 max-w-2xl">
-          Book Your 1:1 Live Trial Class with an Expert Mentor
-        </h1>
-
-        <p className="text-base sm:text-lg text-slate-600 max-w-xl mb-8">
-          Personalized trial classes spanning global time zones with automatic mentor matching, real-time concurrency controls, and seamless scheduling.
-        </p>
-
-        {/* Status card */}
-        <div className="w-full max-w-lg bg-white rounded-2xl p-6 border border-slate-200 shadow-sm text-left">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">
-            System Initialization Status
-          </h2>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm py-2 border-b border-slate-100">
-              <span className="flex items-center gap-2 text-slate-700">
-                <Clock className="w-4 h-4 text-slate-400" /> Backend Health
-              </span>
-              <span className="font-medium text-blue-600">{backendHealth}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm py-2 border-b border-slate-100">
-              <span className="flex items-center gap-2 text-slate-700">
-                <Globe className="w-4 h-4 text-slate-400" /> Detected Time Zone
-              </span>
-              <span className="font-medium text-slate-800">{detectedTz}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm py-2">
-              <span className="flex items-center gap-2 text-slate-700">
-                <UserCheck className="w-4 h-4 text-slate-400" /> Capacity Rule
-              </span>
-              <span className="font-medium text-slate-800">Max 2 Classes/Mentor/Day</span>
-            </div>
-          </div>
-        </div>
+        {/* Screen D: Mentor Schedule Inspector View */}
+        {activeTab === 'mentor-schedule' && <MentorScheduleView />}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
-        Codeyoung Trial Class Booking System &copy; 2026. Built with React, Vite, Tailwind CSS, Express, and Prisma.
+        <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div>
+            Codeyoung Trial Class Appointment Booking &copy; 2026. All rights reserved.
+          </div>
+          <div className="flex items-center gap-4 text-[11px] text-slate-400">
+            <span>Powered by Node.js & React</span>
+            <span>•</span>
+            <span>PostgreSQL Concurrency-Safe Engine</span>
+          </div>
+        </div>
       </footer>
     </div>
   );

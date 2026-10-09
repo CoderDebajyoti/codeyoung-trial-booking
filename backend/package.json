@@ -10,12 +10,23 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:email": "tsx scripts/test-email.ts",
     "lint": "eslint src tests --ext .ts",
     "lint:fix": "eslint src tests --ext .ts --fix",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "tsx prisma/seed.ts"
   },
-  "keywords": ["codeyoung", "trial-booking", "express", "prisma", "typescript"],
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "keywords": [
+    "codeyoung",
+    "trial-booking",
+    "express",
+    "prisma",
+    "typescript"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -33,10 +44,12 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.9.0",
     "@types/nodemailer": "^6.4.16",
+    "@types/pg": "^8.23.1",
     "@types/supertest": "^6.0.2",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "eslint": "^8.57.1",
+    "pg": "^8.23.1",
     "prisma": "^5.22.0",
     "rimraf": "^6.0.1",
     "supertest": "^7.0.0",
