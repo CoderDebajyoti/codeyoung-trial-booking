@@ -117,63 +117,161 @@ The application has been completely redesigned with a warm, golden-yellow-to-ora
 
 ---
 
-## 🚀 Getting Started & Local Development
+## 🚀 Getting Started & Local Development (Windows)
+
+**Important:** `npm run dev` starts a development server; it does not start PostgreSQL. Start PostgreSQL first, then the backend, then the frontend. Open two separate terminals for the app servers and keep both running.
 
 ### Prerequisites
-- **Node.js**: >= 20.x
-- **npm**: >= 10.x
-- **PostgreSQL**: Optional for local dev (built-in fail-safe repository store allows instant execution if PostgreSQL credentials are not yet configured).
 
-### 1. Installation
+- Node.js 20 or newer and npm 10 or newer.
+- PostgreSQL 14+ installed and running locally, **or Docker Desktop**.
+- Git (optional, if you cloned this repository already).
 
-Install all dependencies from the root monorepo:
+### Step 1 — Start PostgreSQL
 
-```bash
-# Install backend dependencies
+Choose **one** option.
+
+**Option A: Docker Desktop (quickest if Docker is installed)**
+
+Run this in PowerShell or a terminal:
+
+```powershell
+docker run --name codeyoung-postgres -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=codeyoung_booking -p 5432:5432 -d postgres:16
+```
+
+If the container already exists, start it instead of creating it again:
+
+```powershell
+docker start codeyoung-postgres
+```
+
+Check that it is running:
+
+```powershell
+docker ps
+docker exec -it codeyoung-postgres pg_isready -U postgres -d codeyoung_booking
+```
+
+Expected result from the second command includes `accepting connections`.
+
+**Option B: PostgreSQL installed on Windows**
+
+1. Open Windows **Services** and start the PostgreSQL service (the name often includes the installed version).
+2. Confirm the service is running and PostgreSQL listens on port `5432`.
+3. In pgAdmin or psql, create a database named `codeyoung_booking` if it does not already exist.
+4. Make sure the database username/password match the connection URL you will put in `backend/.env`.
+
+### Step 2 — Configure the backend database URL
+
+Open a terminal at the repository root, then run:
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+Copy-Item frontend/.env.example frontend/.env
+```
+
+If either destination already exists, PowerShell may ask to overwrite it. Preserve your existing real email settings; do not overwrite a working `.env` without copying its values first.
+
+Open `backend/.env` and set `DATABASE_URL` to match your PostgreSQL setup. For the Docker command above, use:
+
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/codeyoung_booking?schema=public"
+PORT=4000
+NODE_ENV=development
+FRONTEND_URL=http://localhost:5173
+```
+
+This example is for **local development only**. If you chose a different PostgreSQL password, username, port, or database name, update the URL to match. Never commit `backend/.env` or put database credentials in frontend environment variables.
+
+Open `frontend/.env` and confirm it contains:
+
+```env
+VITE_API_URL=http://localhost:4000/api
+```
+
+The frontend URL must point to the backend API, not directly to PostgreSQL. Restart Vite after changing any `VITE_*` environment variable.
+
+### Step 3 — Install dependencies
+
+From the repository root, run:
+
+```powershell
 cd backend
 npm install
+```
 
-# Install frontend dependencies
+Then:
+
+```powershell
 cd ../frontend
 npm install
 ```
 
-### 2. Environment Configuration
+### Step 4 — Create database tables and seed mentors
 
-Copy the example environment files:
+Make sure PostgreSQL is running and `backend/.env` has the correct `DATABASE_URL`. Then:
 
-```bash
-# Backend environment setup
-cp backend/.env.example backend/.env
-
-# Frontend environment setup
-cp frontend/.env.example frontend/.env
-```
-
-### 3. Database Migration & Mentor Seeding (Optional if PostgreSQL running)
-
-```bash
-cd backend
+```powershell
+cd ../backend
 npx prisma generate
 npx prisma db push
-npm run seed
+npm run prisma:seed
 ```
 
-### 4. Running Dev Servers
+What these commands do:
+- `prisma generate` generates the Prisma client.
+- `prisma db push` creates/updates tables to match `backend/prisma/schema.prisma`.
+- `npm run prisma:seed` inserts or updates the sample mentors.
 
-Run both servers in separate terminals or from root:
+You should see the seed script report that seeding completed. If Prisma reports `P1000`, check the database username/password. If it reports `P1001`, check that PostgreSQL is running and the host/port are reachable. If it reports that the database does not exist, create `codeyoung_booking` or correct the URL.
 
-```bash
-# Terminal 1: Run backend (Port 4000)
+### Step 5 — Start the backend
+
+In **Terminal 1**:
+
+```powershell
 cd backend
 npm run dev
+```
 
-# Terminal 2: Run frontend (Port 5173)
+Wait until the backend reports that it is running on port `4000`. Keep this terminal open.
+
+Verify it in a browser at [http://localhost:4000/api/health](http://localhost:4000/api/health). You should receive a JSON health response. If the browser cannot connect, read the backend terminal for the first error before proceeding.
+
+### Step 6 — Start the frontend
+
+Open **Terminal 2** (leave Terminal 1 running):
+
+```powershell
 cd frontend
 `npm run dev`
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+Open the exact local URL printed by Vite, normally [http://localhost:5173](http://localhost:5173).
+
+### Step 7 — Confirm the API and database work
+
+Open these URLs in a browser:
+
+1. [http://localhost:4000/api/health](http://localhost:4000/api/health) — backend is reachable.
+2. [http://localhost:4000/api/mentors](http://localhost:4000/api/mentors) — API should return the seeded mentors.
+3. [http://localhost:4000/api/slots?date=2026-10-12&timeZone=Asia%2FKolkata](http://localhost:4000/api/slots?date=2026-10-12&timeZone=Asia%2FKolkata) — API should return a JSON slots response; availability depends on seeded mentor schedules and bookings.
+
+If the health endpoint works but mentors/slots fail, inspect the **backend terminal** and the response body from the failing API. If the API works in the browser but the frontend says “Failed to fetch,” check `frontend/.env`, CORS, and the browser DevTools **Network** tab. Confirm requests go to `http://localhost:4000/api/...`, not an old deployed URL.
+
+**Important data note:** the repository contains a fail-safe in-memory fallback for some database failures. A page may appear to work while data is not being persisted in PostgreSQL. For this database verification, do not consider the setup complete until PostgreSQL is running, Prisma setup and seeding succeed, and the API returns the expected data.
+
+### Quick commands from the repository root
+
+The root package scripts can start each server in a separate terminal:
+
+```powershell
+npm run dev:backend
+npm run dev:frontend
+```
+
+Do not run both in the same terminal unless you use a process manager. Alternatively, use the `cd backend` / `cd frontend` commands above.
+
 
 ---
 
@@ -343,8 +441,25 @@ The backend incorporates a **durable PostgreSQL outbox queue** and multi-provide
 
 ## 🛠️ Troubleshooting
 
-- **Slot Fetching Delays / DB Connection Issues**: The backend uses an automated circuit-breaker in the repository layer. If PostgreSQL credentials fail or PostgreSQL is not running, the application fails fast to the in-memory fallback store without hanging on connection timeouts.
-- **Port Conflicts**: Ensure port `4000` (backend) and port `5173` (frontend) are free before launching dev servers.
+### “Failed to fetch available slots” / “Failed to fetch mentors”
+
+1. Check that PostgreSQL is running and `backend/.env` has a valid `DATABASE_URL`.
+2. Check the backend terminal for Prisma errors.
+3. Open `http://localhost:4000/api/health` and `http://localhost:4000/api/mentors` directly.
+4. In browser DevTools → **Network**, inspect the failed request URL, status code, and response. The frontend should call `http://localhost:4000/api/...` for local development.
+5. Confirm `frontend/.env` contains `VITE_API_URL=http://localhost:4000/api`, then stop and restart the frontend dev server.
+6. Confirm the backend is running on port `4000` and the frontend on port `5173`. If a port is already in use, stop the other process or update the corresponding configuration consistently.
+
+### Common PostgreSQL / Prisma errors
+
+- **P1000 (authentication failed):** the username/password in `DATABASE_URL` is wrong.
+- **P1001 (can't reach database server):** PostgreSQL/Docker is stopped, or host/port is wrong.
+- **Database does not exist:** create `codeyoung_booking` or correct the database name in `DATABASE_URL`.
+- **Missing tables / relation does not exist:** from the `backend` folder run `npx prisma generate`, then `npx prisma db push`, then `npm run prisma:seed`.
+- **Frontend says fetch failed but the API URL works directly:** check CORS, the frontend's `VITE_API_URL`, and the browser Network/Console tabs.
+
+Do not share or commit real `.env` files. When asking for help, share the error text with passwords, API keys, tokens, and personal data removed.
+
 - **Timezone Abbreviations**: In Windows environments, `dateUtils.ts` automatically maps UTC offsets to standard regional abbreviations (`EST`, `EDT`, `BST`, `GMT`, `IST`).
 
 ---
