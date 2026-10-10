@@ -1,11 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bookingService = exports.BookingService = exports.SlotUnavailableError = void 0;
+exports.bookingService = exports.BookingService = exports.TrialEligibilityError = exports.SlotUnavailableError = void 0;
 const prisma_js_1 = require("../lib/prisma.js");
 const mentor_repository_js_1 = require("../repositories/mentor.repository.js");
 const parent_repository_js_1 = require("../repositories/parent.repository.js");
 const booking_repository_js_1 = require("../repositories/booking.repository.js");
-const email_service_js_1 = require("./email.service.js");
+const notification_service_js_1 = require("./notification.service.js");
+const env_js_1 = require("../config/env.js");
 const dateUtils_js_1 = require("../lib/dateUtils.js");
 const date_fns_1 = require("date-fns");
 class SlotUnavailableError extends Error {
@@ -17,6 +18,32 @@ class SlotUnavailableError extends Error {
     }
 }
 exports.SlotUnavailableError = SlotUnavailableError;
+class TrialEligibilityError extends Error {
+    constructor(message = 'This student has already used their trial class. Please contact our team to explore available courses.') {
+        super(message);
+        this.name = 'TrialEligibilityError';
+    }
+}
+exports.TrialEligibilityError = TrialEligibilityError;
+class AsyncLock {
+    queue = Promise.resolve();
+    async acquire(fn) {
+        let release;
+        const wait = new Promise((resolve) => {
+            release = resolve;
+        });
+        const current = this.queue;
+        this.queue = current.then(() => wait);
+        await current;
+        try {
+            return await fn();
+        }
+        finally {
+            release();
+        }
+    }
+}
+const bookingLock = new AsyncLock();
 class BookingService {
     /**
      * Find available start slots for a parent's requested local date and time zone.
@@ -88,127 +115,128 @@ class BookingService {
      * Concurrency-safe atomic booking creation with fair mentor assignment and 2-classes daily capacity rule.
      */
     async createBooking(input) {
-        if (!(0, dateUtils_js_1.isValidTimeZone)(input.parentTimeZone)) {
-            throw new Error(`Invalid IANA parent time zone: ${input.parentTimeZone}`);
-        }
-        const canonicalParentTz = (0, dateUtils_js_1.normalizeTimeZone)(input.parentTimeZone);
-        const startUtc = (0, dateUtils_js_1.parseRequestedStart)(input.startAt, canonicalParentTz);
-        const endUtc = (0, date_fns_1.addMinutes)(startUtc, dateUtils_js_1.CLASS_DURATION_MINUTES);
-        // 1. Idempotency Check: if idempotency key was previously processed, return existing booking
-        if (input.idempotencyKey) {
-            const existing = await booking_repository_js_1.bookingRepository.findByIdempotencyKey(input.idempotencyKey);
-            if (existing) {
-                return this.formatBookingResponse(existing);
+        return await bookingLock.acquire(async () => {
+            if (!(0, dateUtils_js_1.isValidTimeZone)(input.parentTimeZone)) {
+                throw new Error(`Invalid IANA parent time zone: ${input.parentTimeZone}`);
             }
-        }
-        // 2. Identify candidate mentors who are generally working during this slot
-        const allMentors = await mentor_repository_js_1.mentorRepository.findAllActive();
-        const candidateMentors = allMentors.filter((m) => (0, dateUtils_js_1.isWithinMentorWorkingHours)(startUtc, endUtc, m));
-        if (candidateMentors.length === 0) {
-            const parentDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, canonicalParentTz);
-            const alternatives = await this.findAlternativeSlots(parentDate, canonicalParentTz);
-            throw new SlotUnavailableError('No mentors are scheduled to work at the requested time.', alternatives);
-        }
-        // 3. Execute in transaction (or in-memory transactional logic if DB is offline)
-        const candidateIds = candidateMentors.map((m) => m.id);
-        const executeAssignmentLogic = async (tx) => {
-            // In-transaction idempotency verification
+            const canonicalParentTz = (0, dateUtils_js_1.normalizeTimeZone)(input.parentTimeZone);
+            const startUtc = (0, dateUtils_js_1.parseRequestedStart)(input.startAt, canonicalParentTz);
+            const endUtc = (0, date_fns_1.addMinutes)(startUtc, dateUtils_js_1.CLASS_DURATION_MINUTES);
+            // 1. Idempotency Check: if idempotency key was previously processed, return existing booking
             if (input.idempotencyKey) {
-                const existingTx = await booking_repository_js_1.bookingRepository.findByIdempotencyKey(input.idempotencyKey, tx);
-                if (existingTx) {
-                    return existingTx;
+                const existing = await booking_repository_js_1.bookingRepository.findByIdempotencyKey(input.idempotencyKey);
+                if (existing) {
+                    return this.formatBookingResponse(existing);
                 }
             }
-            // Explicitly lock candidate mentor records in deterministic ID order
-            if (tx) {
-                await mentor_repository_js_1.mentorRepository.lockMentorsByIds(tx, candidateIds);
+            // 2. Pre-check Trial Eligibility (1 confirmed trial per student/parent by default)
+            const priorTrials = await booking_repository_js_1.bookingRepository.countConfirmedTrialsForParentOrStudent(input.parentEmail, input.studentName);
+            if (priorTrials >= env_js_1.env.MAX_TRIALS_PER_STUDENT) {
+                throw new TrialEligibilityError('This student has already used their trial class. Please contact our team to explore available courses.');
             }
-            // Evaluate eligibility and current daily load inside the transaction
-            const mentorLoads = [];
-            for (const mentor of candidateMentors) {
-                // Double-check overlapping bookings inside transaction
-                const overlaps = await booking_repository_js_1.bookingRepository.findOverlappingConfirmedBookings(mentor.id, startUtc, endUtc, tx);
-                if (overlaps.length > 0) {
-                    continue; // Mentor has a conflicting booking
-                }
-                // Calculate mentor's local calendar day window
-                const mentorLocalDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, mentor.timeZone);
-                const { startUtc: mentorDayStart, endUtc: mentorDayEnd } = (0, dateUtils_js_1.getLocalDayUtcRange)(mentorLocalDate, mentor.timeZone);
-                const dailyCount = await booking_repository_js_1.bookingRepository.countMentorConfirmedInUtcRange(mentor.id, mentorDayStart, mentorDayEnd, tx);
-                if (dailyCount < 2) {
-                    mentorLoads.push({ mentor, dailyCount });
-                }
+            // 3. Identify candidate mentors who are generally working during this slot
+            const allMentors = await mentor_repository_js_1.mentorRepository.findAllActive();
+            const candidateMentors = allMentors.filter((m) => (0, dateUtils_js_1.isWithinMentorWorkingHours)(startUtc, endUtc, m));
+            if (candidateMentors.length === 0) {
+                const parentDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, canonicalParentTz);
+                const alternatives = await this.findAlternativeSlots(parentDate, canonicalParentTz);
+                throw new SlotUnavailableError('No mentors are scheduled to work at the requested time.', alternatives);
             }
-            if (mentorLoads.length === 0) {
-                return null; // All candidates are busy or at capacity
-            }
-            // Fair Assignment Algorithm:
-            // Sort primarily by fewest classes assigned on that mentor-local day (ascending),
-            // tie-break deterministically by mentor ID (ascending).
-            mentorLoads.sort((a, b) => {
-                if (a.dailyCount !== b.dailyCount) {
-                    return a.dailyCount - b.dailyCount;
+            // 4. Execute in transaction (or in-memory transactional logic if DB is offline)
+            const candidateIds = candidateMentors.map((m) => m.id);
+            const executeAssignmentLogic = async (tx) => {
+                // In-transaction idempotency verification
+                if (input.idempotencyKey) {
+                    const existingTx = await booking_repository_js_1.bookingRepository.findByIdempotencyKey(input.idempotencyKey, tx);
+                    if (existingTx) {
+                        return existingTx;
+                    }
                 }
-                return a.mentor.id.localeCompare(b.mentor.id);
+                // In-transaction trial eligibility check to prevent concurrent duplicate trial bookings
+                const inTxTrials = await booking_repository_js_1.bookingRepository.countConfirmedTrialsForParentOrStudent(input.parentEmail, input.studentName, tx);
+                if (inTxTrials >= env_js_1.env.MAX_TRIALS_PER_STUDENT) {
+                    throw new TrialEligibilityError('This student has already used their trial class. Please contact our team to explore available courses.');
+                }
+                // Explicitly lock candidate mentor records in deterministic ID order
+                if (tx) {
+                    await mentor_repository_js_1.mentorRepository.lockMentorsByIds(tx, candidateIds);
+                }
+                // Evaluate eligibility and current daily load inside the transaction
+                const mentorLoads = [];
+                for (const mentor of candidateMentors) {
+                    // Double-check overlapping bookings inside transaction
+                    const overlaps = await booking_repository_js_1.bookingRepository.findOverlappingConfirmedBookings(mentor.id, startUtc, endUtc, tx);
+                    if (overlaps.length > 0) {
+                        continue; // Mentor has a conflicting booking
+                    }
+                    // Calculate mentor's local calendar day window
+                    const mentorLocalDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, mentor.timeZone);
+                    const { startUtc: mentorDayStart, endUtc: mentorDayEnd } = (0, dateUtils_js_1.getLocalDayUtcRange)(mentorLocalDate, mentor.timeZone);
+                    const dailyCount = await booking_repository_js_1.bookingRepository.countMentorConfirmedInUtcRange(mentor.id, mentorDayStart, mentorDayEnd, tx);
+                    if (dailyCount < 2) {
+                        mentorLoads.push({ mentor, dailyCount });
+                    }
+                }
+                if (mentorLoads.length === 0) {
+                    return null; // All candidates are busy or at capacity
+                }
+                // Fair Assignment Algorithm:
+                // Sort primarily by fewest classes assigned on that mentor-local day (ascending),
+                // tie-break deterministically by mentor ID (ascending).
+                mentorLoads.sort((a, b) => {
+                    if (a.dailyCount !== b.dailyCount) {
+                        return a.dailyCount - b.dailyCount;
+                    }
+                    return a.mentor.id.localeCompare(b.mentor.id);
+                });
+                const selectedMentor = mentorLoads[0].mentor;
+                // Find or create parent
+                const parent = await parent_repository_js_1.parentRepository.findOrCreate({
+                    name: input.parentName,
+                    email: input.parentEmail,
+                    phone: input.parentPhone,
+                    timeZone: canonicalParentTz,
+                }, tx);
+                // Generate configurable demo class meeting URL
+                const baseUrl = env_js_1.env.DEMO_CLASS_BASE_URL.replace(/\/+$/, '');
+                const demoClassUrl = `${baseUrl}/${Math.random().toString(36).substring(2, 9)}`;
+                // Create confirmed booking
+                const newBooking = await booking_repository_js_1.bookingRepository.create({
+                    parentId: parent.id,
+                    mentorId: selectedMentor.id,
+                    course: input.course || 'Coding & STEM Trial',
+                    startAt: startUtc,
+                    endAt: endUtc,
+                    parentTimeZone: canonicalParentTz,
+                    mentorTimeZone: (0, dateUtils_js_1.normalizeTimeZone)(selectedMentor.timeZone),
+                    demoClassUrl,
+                    idempotencyKey: input.idempotencyKey || null,
+                }, tx);
+                return newBooking;
+            };
+            let bookingResult = null;
+            try {
+                bookingResult = await prisma_js_1.prisma.$transaction(async (tx) => {
+                    return executeAssignmentLogic(tx);
+                });
+            }
+            catch {
+                // Fallback for in-memory execution when database is offline
+                bookingResult = await executeAssignmentLogic();
+            }
+            if (!bookingResult) {
+                const parentDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, input.parentTimeZone);
+                const alternatives = await this.findAlternativeSlots(parentDate, input.parentTimeZone);
+                throw new SlotUnavailableError('All eligible mentors are fully booked or at maximum daily capacity for this time slot.', alternatives);
+            }
+            // Queue durable notifications (immediate confirmations + 30-min reminders)
+            await notification_service_js_1.notificationService.queueBookingNotifications(bookingResult);
+            // Trigger immediate asynchronous outbox dispatch
+            notification_service_js_1.notificationService.processOutbox().catch((err) => {
+                console.error('Failed in initial outbox dispatch:', err);
             });
-            const selectedMentor = mentorLoads[0].mentor;
-            // Find or create parent
-            const parent = await parent_repository_js_1.parentRepository.findOrCreate({
-                name: input.parentName,
-                email: input.parentEmail,
-                phone: input.parentPhone,
-                timeZone: canonicalParentTz,
-            }, tx);
-            // Generate dummy demo class meeting URL
-            const demoClassUrl = `https://meet.codeyoung.com/trial/${Math.random().toString(36).substring(2, 9)}`;
-            // Create confirmed booking
-            const newBooking = await booking_repository_js_1.bookingRepository.create({
-                parentId: parent.id,
-                mentorId: selectedMentor.id,
-                course: input.course || 'Coding & STEM Trial',
-                startAt: startUtc,
-                endAt: endUtc,
-                parentTimeZone: canonicalParentTz,
-                mentorTimeZone: (0, dateUtils_js_1.normalizeTimeZone)(selectedMentor.timeZone),
-                demoClassUrl,
-                idempotencyKey: input.idempotencyKey || null,
-            }, tx);
-            return newBooking;
-        };
-        let bookingResult = null;
-        try {
-            bookingResult = await prisma_js_1.prisma.$transaction(async (tx) => {
-                return executeAssignmentLogic(tx);
-            });
-        }
-        catch {
-            // Fallback for in-memory execution when database is offline
-            bookingResult = await executeAssignmentLogic();
-        }
-        if (!bookingResult) {
-            const parentDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, input.parentTimeZone);
-            const alternatives = await this.findAlternativeSlots(parentDate, input.parentTimeZone);
-            throw new SlotUnavailableError('All eligible mentors are fully booked or at maximum daily capacity for this time slot.', alternatives);
-        }
-        // Trigger testable email notification asynchronously
-        email_service_js_1.emailService
-            .sendBookingConfirmation({
-            bookingId: bookingResult.id,
-            parentEmail: bookingResult.parent.email,
-            parentName: bookingResult.parent.name,
-            parentTimeZone: bookingResult.parentTimeZone,
-            mentorEmail: bookingResult.mentor.email,
-            mentorName: bookingResult.mentor.name,
-            mentorTimeZone: bookingResult.mentorTimeZone,
-            course: bookingResult.course || input.course || 'Coding & STEM Trial',
-            startAtUtc: bookingResult.startAt,
-            endAtUtc: bookingResult.endAt,
-            demoClassUrl: bookingResult.demoClassUrl,
-        })
-            .catch((err) => {
-            console.error('Failed to dispatch email confirmation:', err);
+            return this.formatBookingResponse(bookingResult);
         });
-        return this.formatBookingResponse(bookingResult);
     }
     async getBookingById(id) {
         const booking = await booking_repository_js_1.bookingRepository.findById(id);
@@ -244,6 +272,19 @@ class BookingService {
                 localEndTime: (0, dateUtils_js_1.formatLocalTime)(booking.endAt, booking.mentorTimeZone, 'HH:mm:ss (zzz)'),
             },
             createdAt: booking.createdAt.toISOString(),
+        };
+    }
+    async checkTrialEligibility(parentEmail, studentName) {
+        const confirmedCount = await booking_repository_js_1.bookingRepository.countConfirmedTrialsForParentOrStudent(parentEmail, studentName);
+        const maxAllowed = env_js_1.env.MAX_TRIALS_PER_STUDENT;
+        const eligible = confirmedCount < maxAllowed;
+        return {
+            eligible,
+            remainingTrials: Math.max(0, maxAllowed - confirmedCount),
+            maxAllowed,
+            message: eligible
+                ? undefined
+                : 'This student has already used their trial class. Please contact our team to explore available courses.',
         };
     }
 }

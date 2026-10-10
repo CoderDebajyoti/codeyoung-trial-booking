@@ -11,16 +11,37 @@ const envSchema = z.object({
   // Support EMAIL_PROVIDER as primary, fallback to EMAIL_ADAPTER
   EMAIL_PROVIDER: z.enum(['mock', 'smtp', 'resend', 'mailpit', 'test']).default('mock'),
   EMAIL_ADAPTER: z.enum(['mock', 'smtp', 'resend', 'mailpit', 'test']).optional(),
-  EMAIL_FROM: z.string().default('no-reply@codeyoung.com'),
-  RESEND_API_KEY: z.string().optional().default(''),
-  SMTP_HOST: z.string().optional().default('localhost'),
+  EMAIL_FROM: z.string().default('no-reply@codeyoung.com').transform((val) => val.trim()),
+  EMAIL_OVERRIDE_RECIPIENT: z.string().optional().default('').transform((val) => val.trim()),
+  RESEND_API_KEY: z.string().optional().default('').transform((val) => val.trim()),
+  SMTP_HOST: z.string().optional().default('localhost').transform((val) => val.trim()),
   SMTP_PORT: z.string().optional().default('587').transform((val) => parseInt(val, 10)),
   SMTP_SECURE: z.string().optional().default('false').transform((val) => val === 'true' || val === '1'),
-  SMTP_USER: z.string().optional().default(''),
-  SMTP_PASS: z.string().optional().default(''),
+  SMTP_USER: z.string().optional().default('').transform((val) => val.trim()),
+  SMTP_PASS: z.string().optional().default('').transform((val) => val.trim()),
   DEMO_CLASS_BASE_URL: z.string().url().default('https://meet.codeyoung.com/trial'),
   REMINDER_INTERVAL_SECONDS: z.string().optional().default('10').transform((val) => parseInt(val, 10)),
   NOTIFICATION_WORKER_ENABLED: z.string().optional().default('true').transform((val) => val !== 'false' && val !== '0'),
+
+  // Authentication & Session Security
+  JWT_SECRET: z.string().default('codeyoung-super-secure-jwt-secret-key-2026').transform((val) => val.trim()),
+  JWT_EXPIRES_IN: z.string().default('24h').transform((val) => val.trim()),
+
+  // Bot & Abuse Protection (Cloudflare Turnstile CAPTCHA)
+  CAPTCHA_ENABLED: z.string().optional().default('false').transform((val) => val === 'true' || val === '1'),
+  TURNSTILE_SECRET_KEY: z.string().optional().default('').transform((val) => val.trim()),
+
+  // Parent Email OTP Verification
+  OTP_ENABLED: z.string().optional().default('true').transform((val) => val !== 'false' && val !== '0'),
+  OTP_EXPIRY_MINUTES: z.string().optional().default('5').transform((val) => parseInt(val, 10)),
+  OTP_MAX_ATTEMPTS: z.string().optional().default('3').transform((val) => parseInt(val, 10)),
+  OTP_RESEND_COOLDOWN_SECONDS: z.string().optional().default('60').transform((val) => parseInt(val, 10)),
+
+  // Trial Booking Eligibility Policies
+  MAX_TRIALS_PER_STUDENT: z.string().optional().default('1').transform((val) => parseInt(val, 10)),
+
+  // Rate Limiting
+  RATE_LIMIT_ENABLED: z.string().optional().default('true').transform((val) => val !== 'false' && val !== '0'),
 });
 
 const parseEnv = () => {

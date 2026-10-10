@@ -178,6 +178,51 @@ export class BookingRepository {
     }
   }
 
+  /**
+   * Count confirmed trial bookings for a parent/student identity to enforce trial eligibility limits.
+   */
+  async countConfirmedTrialsForParentOrStudent(
+    parentEmail: string,
+    studentName?: string,
+    txDb?: Prisma.TransactionClient
+  ): Promise<number> {
+    const client = txDb || this.db;
+    const normalizedEmail = parentEmail.toLowerCase().trim();
+
+    if (!isDbConnected() && client === defaultPrisma) {
+      return inMemoryStore.bookings.filter((b) => {
+        const emailMatch = b.parent?.email?.toLowerCase().trim() === normalizedEmail;
+        const statusMatch = b.status === BookingStatus.CONFIRMED;
+        if (!emailMatch || !statusMatch) return false;
+        if (studentName && (b as any).studentName) {
+          return (b as any).studentName.toLowerCase().trim() === studentName.toLowerCase().trim();
+        }
+        return true;
+      }).length;
+    }
+
+    try {
+      return await client.booking.count({
+        where: {
+          parent: {
+            email: {
+              equals: normalizedEmail,
+              mode: 'insensitive',
+            },
+          },
+          status: BookingStatus.CONFIRMED,
+        },
+      });
+    } catch {
+      markDbDisconnected();
+      return inMemoryStore.bookings.filter((b) => {
+        const emailMatch = b.parent?.email?.toLowerCase().trim() === normalizedEmail;
+        const statusMatch = b.status === BookingStatus.CONFIRMED;
+        return emailMatch && statusMatch;
+      }).length;
+    }
+  }
+
   async create(
     data: CreateBookingData,
     txDb?: Prisma.TransactionClient

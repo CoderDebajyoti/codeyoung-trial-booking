@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { addMinutes, addHours } from 'date-fns';
-import { MockEmailService, ResendEmailService, SmtpEmailService } from '../../src/services/email.service.js';
+import { MockEmailService, ResendEmailService } from '../../src/services/email.service.js';
 import { NotificationService } from '../../src/services/notification.service.js';
 import { notificationRepository } from '../../src/repositories/notification.repository.js';
 import { inMemoryStore } from '../../src/lib/inMemoryStore.js';

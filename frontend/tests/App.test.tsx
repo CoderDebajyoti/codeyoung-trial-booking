@@ -9,6 +9,68 @@ describe('Codeyoung Trial Booking Frontend Comprehensive Tests', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string, options?: RequestInit) => {
+        if (url.includes('/api/auth/me')) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                status: 'success',
+                data: {
+                  user: {
+                    id: 'mentor-1',
+                    name: 'Sarah Johnson',
+                    email: 'sarah@codeyoung.com',
+                    role: 'MENTOR',
+                    mentorId: 'mentor-1',
+                  },
+                },
+              }),
+          });
+        }
+
+        if (url.includes('/api/auth/login')) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                status: 'success',
+                data: {
+                  token: 'mock-jwt-token',
+                  user: {
+                    id: 'mentor-1',
+                    name: 'Sarah Johnson',
+                    email: 'sarah@codeyoung.com',
+                    role: 'MENTOR',
+                    mentorId: 'mentor-1',
+                  },
+                },
+              }),
+          });
+        }
+
+        if (url.includes('/api/auth/otp/send')) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                status: 'success',
+                message: 'Verification code sent',
+                data: { cooldownSeconds: 60 },
+              }),
+          });
+        }
+
+        if (url.includes('/api/auth/otp/verify')) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                status: 'success',
+                data: { verificationToken: 'test-verified-token' },
+              }),
+          });
+        }
+
         if (url.includes('/api/mentors/') && url.includes('/schedule')) {
           return Promise.resolve({
             ok: true,
@@ -206,6 +268,7 @@ describe('Codeyoung Trial Booking Frontend Comprehensive Tests', () => {
 
     // Fill valid form with Asia/Kolkata timezone
     fireEvent.change(screen.getByLabelText(/Parent Full Name/i), { target: { value: 'John Smith' } });
+    fireEvent.change(screen.getByLabelText(/Student Full Name/i), { target: { value: 'Leo Smith' } });
     fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'john@example.com' } });
     fireEvent.change(screen.getByLabelText(/Phone Number/i), { target: { value: '+1 555 987 6543' } });
     fireEvent.change(screen.getByLabelText(/Your Time Zone/i), { target: { value: 'Asia/Kolkata' } });
@@ -290,6 +353,7 @@ describe('Codeyoung Trial Booking Frontend Comprehensive Tests', () => {
     render(<App />);
 
     fireEvent.change(screen.getByLabelText(/Parent Full Name/i), { target: { value: 'John Smith' } });
+    fireEvent.change(screen.getByLabelText(/Student Full Name/i), { target: { value: 'Leo Smith' } });
     fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'john@example.com' } });
     fireEvent.change(screen.getByLabelText(/Phone Number/i), { target: { value: '+1 555 987 6543' } });
     fireEvent.click(screen.getByRole('button', { name: /Verify and Select Time/i }));
@@ -368,6 +432,7 @@ describe('Codeyoung Trial Booking Frontend Comprehensive Tests', () => {
     render(<App />);
 
     fireEvent.change(screen.getByLabelText(/Parent Full Name/i), { target: { value: 'John Smith' } });
+    fireEvent.change(screen.getByLabelText(/Student Full Name/i), { target: { value: 'Leo Smith' } });
     fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'john@example.com' } });
     fireEvent.change(screen.getByLabelText(/Phone Number/i), { target: { value: '+1 555 987 6543' } });
     fireEvent.click(screen.getByRole('button', { name: /Verify and Select Time/i }));
@@ -384,15 +449,41 @@ describe('Codeyoung Trial Booking Frontend Comprehensive Tests', () => {
     expect(screen.getByText('10:00')).toBeInTheDocument();
   });
 
-  it('switches to Mentor Capacity Inspector view and displays mentor schedule & capacity limits', async () => {
+  it('switches to Mentor Capacity Inspector view and displays mentor schedule & capacity limits after login', async () => {
     render(<App />);
 
-    const mentorTab = screen.getByRole('button', { name: /Mentor Capacity/i });
+    const mentorTab = screen.getByRole('button', { name: /Mentor Portal|Portal/i });
     fireEvent.click(mentorTab);
 
+    // Login modal should open for unauthenticated access
+    expect(await screen.findByText(/Mentor & Admin Access/i)).toBeInTheDocument();
+
+    // Click Sign In to Portal
+    const signInBtn = screen.getByRole('button', { name: /Sign In to (Mentor )?Portal/i });
+    fireEvent.click(signInBtn);
+
+    // Now authorized mentor schedule view opens
     expect(await screen.findByText(/Daily Capacity & Bookings/i)).toBeInTheDocument();
     expect(screen.getByText(/Daily Capacity Limit/i)).toBeInTheDocument();
     expect(screen.getByText(/1 \/ 2 Classes Used/i)).toBeInTheDocument();
     expect(screen.getByText(/Alice Parent/i)).toBeInTheDocument();
+  });
+
+  it('allows parent to request and verify email OTP on Screen A', async () => {
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'parent.test@example.com' } });
+    
+    // Click send OTP code
+    const sendOtpBtn = screen.getByRole('button', { name: /Send 6-Digit Verification Code/i });
+    fireEvent.click(sendOtpBtn);
+
+    expect(await screen.findByPlaceholderText('123456')).toBeInTheDocument();
+
+    // Enter 6-digit OTP code and verify
+    fireEvent.change(screen.getByPlaceholderText('123456'), { target: { value: '654321' } });
+    fireEvent.click(screen.getByRole('button', { name: /Verify Code/i }));
+
+    expect(await screen.findByText(/Verified/i)).toBeInTheDocument();
   });
 });

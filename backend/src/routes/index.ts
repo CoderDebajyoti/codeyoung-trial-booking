@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import authRoutes from './auth.routes.js';
 import healthRoutes from './health.routes.js';
 import mentorRoutes from './mentor.routes.js';
 import slotRoutes from './slot.routes.js';
@@ -8,6 +9,7 @@ import notificationRoutes from './notification.routes.js';
 
 const apiRouter = Router();
 
+apiRouter.use('/auth', authRoutes);
 apiRouter.use('/health', healthRoutes);
 apiRouter.use('/mentors', mentorRoutes);
 apiRouter.use('/slots', slotRoutes);

@@ -230,3 +230,62 @@ Add tests covering normalization, offsets, friendly names, and instant equivalen
    - **Monorepo Tests**: 55/55 tests passed (49 backend, 6 frontend) in 4.37s.
    - **Monorepo Lint**: 0 errors, 0 warnings.
    - **Production Builds**: Backend (`tsc`) and frontend (`vite build` in 2.69s) compiled with zero errors.
+
+---
+
+## Session 8: Critical Bug Fix — Real Email Delivery and Automatic Class Reminders
+
+### User Prompt
+```markdown
+# Critical Bug Fix: Real Email Delivery and Automatic Class Reminders
+
+Work in my existing Codeyoung trial-class booking repository.
+
+The website shows a successful booking confirmation, but I do not receive an email at the address I entered. I need real, automatic email delivery, not merely a confirmation screen, console log, mock adapter, or simulated success message.
+
+Inspect the existing code before making changes. Preserve the current booking system, mentor assignment, time-zone handling, and UI.
+
+1. Diagnose the current email implementation
+2. Implement real transactional email (Resend / SMTP / Gmail App Passwords / Mailpit)
+3. Reliable booking and notification workflow (Durable Outbox pattern, idempotency, retries)
+4. Automatic reminder emails (Durable 30-minute advance notifications for parent and mentor)
+5. Environment configuration (.env.example & README.md)
+6. Observability and troubleshooting (/api/notifications/recent, /api/notifications/booking/:id)
+7. Automated tests (Unit, integration, outbox, retry, time-zone localization)
+8. Verification and documentation
+```
+
+### Root Cause Analysis
+1. **Default Mock Configuration**: `backend/.env` defaulted to `EMAIL_PROVIDER=mock`, which only captured messages in an in-memory array and printed a console message without making real network requests.
+2. **Lack of Durable Outbox & Status Persistence**: The original email service did not persist notifications in PostgreSQL. If a provider dropped a connection or credentials failed, the message was permanently lost and never retried.
+3. **Missing Class Reminders**: No scheduling mechanism or database model existed to compute or send reminders 30 minutes before class start time.
+4. **Silent Mock Fallback**: Missing credentials did not record explicit `FAILED` state logs or provider rejection errors.
+
+### Key Implementations & Architectural Decisions
+1. **Prisma Schema `Notification` Outbox Model**:
+   - Added `Notification` model to `schema.prisma` with `NotificationType` (`BOOKING_CONFIRMATION_PARENT`, `BOOKING_NOTIFICATION_MENTOR`, `CLASS_REMINDER_PARENT`, `CLASS_REMINDER_MENTOR`) and `NotificationStatus` (`PENDING`, `ACCEPTED`, `FAILED`).
+   - Added composite unique constraint `@@unique([bookingId, type])` to mathematically guarantee zero duplicate emails across concurrent worker ticks or idempotent request retries.
+2. **Multi-Provider Email Engine (`email.service.ts`)**:
+   - **Resend**: Transactional REST API via `RESEND_API_KEY`.
+   - **SMTP**: Gmail App Passwords, SendGrid, Mailgun, AWS SES, Mailpit (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`).
+   - **Mock**: In-memory transport for unit/integration testing.
+   - Provider returns structured `EmailSendResult` (`{ success, messageId, status: 'ACCEPTED' | 'FAILED', error, provider }`).
+3. **Notification & 30-Minute Reminder Outbox Service (`notification.service.ts`)**:
+   - Immediate confirmation emails scheduled at `now()` formatted in recipient-specific local time zones (e.g. EDT for parent, IST for mentor).
+   - Reminders automatically scheduled at `booking.startAt - 30 minutes`.
+   - Classes booked `< 30 min` before start safely skip past reminders.
+   - Background outbox worker polls periodically, verifies booking is still `CONFIRMED`, retries temporary failures with exponential backoff up to 3 attempts, and marks `FAILED` with diagnostics if max attempts exceeded.
+   - Cancellation hooks mark pending notifications as `FAILED` (`Cancelled: Booking was cancelled`).
+4. **Observability & Diagnostics Endpoints**:
+   - `GET /api/notifications/recent` — Lists outbox records, statuses, attempt counts, and error logs.
+   - `GET /api/notifications/booking/:id` — Inspects all notifications for a specific booking reference.
+   - `GET /api/notifications/verify-config` — Health-checks provider credentials.
+   - `POST /api/notifications/process-outbox` — Triggers instant outbox run.
+5. **Standalone Smoke-Test CLI Script**:
+   - Added `npm run test:email -- --to=parent@example.com` (`backend/scripts/test-email.ts`) for real delivery verification.
+6. **Automated Testing**:
+   - Added `backend/tests/unit/notification.test.ts` (8 tests covering provider configuration validation, missing keys, localized bodies, 30-min reminders, retry backoff, deduplication, and cancellation).
+   - Updated `backend/tests/integration/emailAndBooking.test.ts` (4 integration tests).
+   - Monorepo test suite: **64/64 tests passed** (58 backend, 6 frontend).
+   - Linting: **0 errors, 0 warnings**.
+   - Production builds: Backend (`tsc`) and frontend (`vite build`) compiled successfully.

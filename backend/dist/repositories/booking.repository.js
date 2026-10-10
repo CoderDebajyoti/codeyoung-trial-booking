@@ -139,6 +139,46 @@ class BookingRepository {
                 .sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
         }
     }
+    /**
+     * Count confirmed trial bookings for a parent/student identity to enforce trial eligibility limits.
+     */
+    async countConfirmedTrialsForParentOrStudent(parentEmail, studentName, txDb) {
+        const client = txDb || this.db;
+        const normalizedEmail = parentEmail.toLowerCase().trim();
+        if (!(0, prisma_js_1.isDbConnected)() && client === prisma_js_1.prisma) {
+            return inMemoryStore_js_1.inMemoryStore.bookings.filter((b) => {
+                const emailMatch = b.parent?.email?.toLowerCase().trim() === normalizedEmail;
+                const statusMatch = b.status === client_1.BookingStatus.CONFIRMED;
+                if (!emailMatch || !statusMatch)
+                    return false;
+                if (studentName && b.studentName) {
+                    return b.studentName.toLowerCase().trim() === studentName.toLowerCase().trim();
+                }
+                return true;
+            }).length;
+        }
+        try {
+            return await client.booking.count({
+                where: {
+                    parent: {
+                        email: {
+                            equals: normalizedEmail,
+                            mode: 'insensitive',
+                        },
+                    },
+                    status: client_1.BookingStatus.CONFIRMED,
+                },
+            });
+        }
+        catch {
+            (0, prisma_js_1.markDbDisconnected)();
+            return inMemoryStore_js_1.inMemoryStore.bookings.filter((b) => {
+                const emailMatch = b.parent?.email?.toLowerCase().trim() === normalizedEmail;
+                const statusMatch = b.status === client_1.BookingStatus.CONFIRMED;
+                return emailMatch && statusMatch;
+            }).length;
+        }
+    }
     async create(data, txDb) {
         const client = txDb || this.db;
         if (!(0, prisma_js_1.isDbConnected)() && client === prisma_js_1.prisma) {

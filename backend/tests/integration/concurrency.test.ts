@@ -88,6 +88,7 @@ describe('Concurrency & Race-Condition Protection Tests', () => {
       parentTimeZone: 'Asia/Kolkata',
       startAt: '2026-10-12T04:30:00.000Z',
       idempotencyKey: 'idem-concurrent-1',
+      verificationToken: 'test-verified-token',
     });
 
     expect(req1.status).toBe(201);
@@ -100,6 +101,7 @@ describe('Concurrency & Race-Condition Protection Tests', () => {
       parentTimeZone: 'Asia/Kolkata',
       startAt: '2026-10-12T04:30:00.000Z',
       idempotencyKey: 'idem-concurrent-2',
+      verificationToken: 'test-verified-token',
     });
 
     expect(req2.status).toBe(409);

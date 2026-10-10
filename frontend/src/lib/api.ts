@@ -25,6 +25,8 @@ export interface CreateBookingRequest {
   parentTimeZone: string;
   startAt: string; // UTC ISO string
   idempotencyKey?: string;
+  verificationToken?: string;
+  captchaToken?: string;
 }
 
 export interface BookingResponseData {
@@ -53,18 +55,6 @@ export interface BookingResponseData {
     localEndTime: string;
   };
   createdAt: string;
-}
-
-export interface CreateBookingSuccessResponse {
-  status: 'success';
-  data: BookingResponseData;
-}
-
-export interface CreateBookingErrorResponse {
-  status: 'fail' | 'error';
-  message: string;
-  code?: string;
-  alternativeSlots?: SlotItem[];
 }
 
 export interface MentorItem {
@@ -115,7 +105,36 @@ export interface MentorScheduleResponse {
   };
 }
 
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: 'MENTOR' | 'ADMIN';
+  mentorId?: string;
+}
+
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const AUTH_TOKEN_KEY = 'codeyoung_auth_token';
+
+export const tokenStorage = {
+  getToken(): string | null {
+    try {
+      return localStorage.getItem(AUTH_TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  setToken(token: string) {
+    try {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+    } catch {}
+  },
+  clearToken() {
+    try {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+    } catch {}
+  },
+};
 
 export const api = {
   async getHealth(): Promise<{ status: string; uptime: number }> {
@@ -163,10 +182,115 @@ export const api = {
     return json.data;
   },
 
-  async getMentorSchedule(mentorId: string, date: string): Promise<MentorScheduleResponse['data']> {
-    const res = await fetch(`${API_BASE}/mentors/${mentorId}/schedule?date=${date}`);
-    if (!res.ok) throw new Error('Failed to fetch mentor schedule');
-    const json: MentorScheduleResponse = await res.json();
+  async checkTrialEligibility(email: string, studentName?: string): Promise<{ eligible: boolean; remainingTrials: number; maxAllowed: number; message?: string }> {
+    const params = new URLSearchParams({ email });
+    if (studentName) params.append('studentName', studentName);
+    const res = await fetch(`${API_BASE}/bookings/eligibility?${params.toString()}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Failed to check trial eligibility');
+    }
+    const json = await res.json();
     return json.data;
+  },
+
+  async getMentorSchedule(mentorId: string, date: string): Promise<MentorScheduleResponse['data']> {
+    const headers: Record<string, string> = {};
+    const token = tokenStorage.getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`${API_BASE}/mentors/${mentorId}/schedule?date=${date}`, {
+      headers,
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to fetch mentor schedule');
+    }
+    return json.data;
+  },
+
+  // -------------------------------------------------------------
+  // Authentication & OTP API Methods
+  // -------------------------------------------------------------
+
+  async sendOtp(email: string, captchaToken?: string): Promise<{ success: boolean; message: string; cooldownSeconds: number }> {
+    const res = await fetch(`${API_BASE}/auth/otp/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, captchaToken }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to send verification code');
+    }
+    return {
+      success: true,
+      message: json.message,
+      cooldownSeconds: json.data?.cooldownSeconds || 60,
+    };
+  },
+
+  async verifyOtp(email: string, otp: string): Promise<{ verificationToken: string }> {
+    const res = await fetch(`${API_BASE}/auth/otp/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, otp }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.message || 'Invalid verification code');
+    }
+    return {
+      verificationToken: json.data.verificationToken,
+    };
+  },
+
+  async login(email: string, password: string, captchaToken?: string): Promise<{ user: AuthUser; token: string }> {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, captchaToken }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.message || 'Authentication failed');
+    }
+
+    tokenStorage.setToken(json.data.token);
+    return json.data;
+  },
+
+  async getMe(): Promise<AuthUser | null> {
+    const token = tokenStorage.getToken();
+    if (!token) return null;
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        tokenStorage.clearToken();
+        return null;
+      }
+
+      const json = await res.json();
+      return json.data.user;
+    } catch {
+      return null;
+    }
+  },
+
+  async logout(): Promise<void> {
+    tokenStorage.clearToken();
+    try {
+      await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+    } catch {}
   },
 };

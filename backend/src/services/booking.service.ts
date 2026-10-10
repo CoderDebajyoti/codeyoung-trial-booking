@@ -74,6 +74,36 @@ export class SlotUnavailableError extends Error {
   }
 }
 
+export class TrialEligibilityError extends Error {
+  constructor(
+    message: string = 'This student has already used their trial class. Please contact our team to explore available courses.'
+  ) {
+    super(message);
+    this.name = 'TrialEligibilityError';
+  }
+}
+
+class AsyncLock {
+  private queue: Promise<void> = Promise.resolve();
+
+  async acquire<T>(fn: () => Promise<T>): Promise<T> {
+    let release: () => void;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const current = this.queue;
+    this.queue = current.then(() => wait);
+    await current;
+    try {
+      return await fn();
+    } finally {
+      release!();
+    }
+  }
+}
+
+const bookingLock = new AsyncLock();
+
 export class BookingService {
   /**
    * Find available start slots for a parent's requested local date and time zone.
@@ -171,23 +201,35 @@ export class BookingService {
    * Concurrency-safe atomic booking creation with fair mentor assignment and 2-classes daily capacity rule.
    */
   async createBooking(input: CreateBookingInput): Promise<FormattedBookingResponse> {
-    if (!isValidTimeZone(input.parentTimeZone)) {
-      throw new Error(`Invalid IANA parent time zone: ${input.parentTimeZone}`);
-    }
-
-    const canonicalParentTz = normalizeTimeZone(input.parentTimeZone);
-    const startUtc = parseRequestedStart(input.startAt, canonicalParentTz);
-    const endUtc = addMinutes(startUtc, CLASS_DURATION_MINUTES);
-
-    // 1. Idempotency Check: if idempotency key was previously processed, return existing booking
-    if (input.idempotencyKey) {
-      const existing = await bookingRepository.findByIdempotencyKey(input.idempotencyKey);
-      if (existing) {
-        return this.formatBookingResponse(existing);
+    return await bookingLock.acquire(async () => {
+      if (!isValidTimeZone(input.parentTimeZone)) {
+        throw new Error(`Invalid IANA parent time zone: ${input.parentTimeZone}`);
       }
-    }
 
-    // 2. Identify candidate mentors who are generally working during this slot
+      const canonicalParentTz = normalizeTimeZone(input.parentTimeZone);
+      const startUtc = parseRequestedStart(input.startAt, canonicalParentTz);
+      const endUtc = addMinutes(startUtc, CLASS_DURATION_MINUTES);
+
+      // 1. Idempotency Check: if idempotency key was previously processed, return existing booking
+      if (input.idempotencyKey) {
+        const existing = await bookingRepository.findByIdempotencyKey(input.idempotencyKey);
+        if (existing) {
+          return this.formatBookingResponse(existing);
+        }
+      }
+
+      // 2. Pre-check Trial Eligibility (1 confirmed trial per student/parent by default)
+      const priorTrials = await bookingRepository.countConfirmedTrialsForParentOrStudent(
+        input.parentEmail,
+        (input as any).studentName
+      );
+      if (priorTrials >= env.MAX_TRIALS_PER_STUDENT) {
+        throw new TrialEligibilityError(
+          'This student has already used their trial class. Please contact our team to explore available courses.'
+        );
+      }
+
+    // 3. Identify candidate mentors who are generally working during this slot
     const allMentors = await mentorRepository.findAllActive();
     const candidateMentors = allMentors.filter((m) =>
       isWithinMentorWorkingHours(startUtc, endUtc, m)
@@ -202,7 +244,7 @@ export class BookingService {
       );
     }
 
-    // 3. Execute in transaction (or in-memory transactional logic if DB is offline)
+    // 4. Execute in transaction (or in-memory transactional logic if DB is offline)
     const candidateIds = candidateMentors.map((m) => m.id);
 
     const executeAssignmentLogic = async (
@@ -214,6 +256,18 @@ export class BookingService {
         if (existingTx) {
           return existingTx;
         }
+      }
+
+      // In-transaction trial eligibility check to prevent concurrent duplicate trial bookings
+      const inTxTrials = await bookingRepository.countConfirmedTrialsForParentOrStudent(
+        input.parentEmail,
+        (input as any).studentName,
+        tx
+      );
+      if (inTxTrials >= env.MAX_TRIALS_PER_STUDENT) {
+        throw new TrialEligibilityError(
+          'This student has already used their trial class. Please contact our team to explore available courses.'
+        );
       }
 
       // Explicitly lock candidate mentor records in deterministic ID order
@@ -334,7 +388,7 @@ export class BookingService {
     });
 
     return this.formatBookingResponse(bookingResult);
-
+    });
   }
 
   async getBookingById(id: string): Promise<FormattedBookingResponse> {
@@ -372,6 +426,26 @@ export class BookingService {
         localEndTime: formatLocalTime(booking.endAt, booking.mentorTimeZone, 'HH:mm:ss (zzz)'),
       },
       createdAt: booking.createdAt.toISOString(),
+    };
+  }
+
+  async checkTrialEligibility(
+    parentEmail: string,
+    studentName?: string
+  ): Promise<{ eligible: boolean; remainingTrials: number; maxAllowed: number; message?: string }> {
+    const confirmedCount = await bookingRepository.countConfirmedTrialsForParentOrStudent(
+      parentEmail,
+      studentName
+    );
+    const maxAllowed = env.MAX_TRIALS_PER_STUDENT;
+    const eligible = confirmedCount < maxAllowed;
+    return {
+      eligible,
+      remainingTrials: Math.max(0, maxAllowed - confirmedCount),
+      maxAllowed,
+      message: eligible
+        ? undefined
+        : 'This student has already used their trial class. Please contact our team to explore available courses.',
     };
   }
 }

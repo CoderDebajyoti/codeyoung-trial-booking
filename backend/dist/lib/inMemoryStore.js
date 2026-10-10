@@ -128,6 +128,13 @@ class InMemoryStore {
     mentors = [...DEFAULT_MENTORS];
     parents = [];
     bookings = [];
+    notifications = [];
+    reset() {
+        this.mentors = [...DEFAULT_MENTORS];
+        this.parents = [];
+        this.bookings = [];
+        this.notifications = [];
+    }
     getMentors() {
         return this.mentors.filter((m) => m.isActive);
     }
@@ -181,6 +188,51 @@ class InMemoryStore {
         };
         this.bookings.push(newBooking);
         return newBooking;
+    }
+    createNotification(data) {
+        const existing = this.notifications.find((n) => n.bookingId === data.bookingId && n.type === data.type);
+        if (existing) {
+            return existing;
+        }
+        const notif = {
+            id: `notif-${Math.random().toString(36).substring(2, 9)}`,
+            bookingId: data.bookingId,
+            type: data.type,
+            recipient: data.recipient,
+            recipientRole: data.recipientRole,
+            subject: data.subject,
+            content: data.content,
+            htmlContent: data.htmlContent || null,
+            status: client_1.NotificationStatus.PENDING,
+            scheduledFor: data.scheduledFor || new Date(),
+            sentAt: null,
+            attemptCount: 0,
+            lastError: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        };
+        this.notifications.push(notif);
+        return notif;
+    }
+    getPendingNotifications(now = new Date()) {
+        return this.notifications.filter((n) => n.status === client_1.NotificationStatus.PENDING && n.scheduledFor <= now && n.attemptCount < 3);
+    }
+    updateNotification(id, data) {
+        const notif = this.notifications.find((n) => n.id === id);
+        if (!notif)
+            return null;
+        if (data.status !== undefined)
+            notif.status = data.status;
+        if (data.sentAt !== undefined)
+            notif.sentAt = data.sentAt;
+        if (data.attemptCount !== undefined)
+            notif.attemptCount = data.attemptCount;
+        if (data.lastError !== undefined)
+            notif.lastError = data.lastError;
+        if (data.scheduledFor !== undefined)
+            notif.scheduledFor = data.scheduledFor;
+        notif.updatedAt = new Date();
+        return notif;
     }
 }
 exports.inMemoryStore = new InMemoryStore();

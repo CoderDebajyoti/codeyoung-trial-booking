@@ -4,39 +4,93 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    --background: 42 100% 95%; /* #FFF8E8 */
+    --foreground: 23 65% 27%;  /* #713B18 */
 
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 23 65% 27%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover: 40 100% 91%;    /* #FFF0D2 */
+    --popover-foreground: 23 65% 27%;
 
-    --primary: 221 83% 53%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 43 100% 59%;    /* #FFC52E */
+    --primary-foreground: 23 65% 27%; /* #713B18 */
 
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
+    --secondary: 40 100% 91%;  /* #FFF0D2 */
+    --secondary-foreground: 21 74% 29%; /* #843B13 */
 
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 40 100% 91%;
+    --muted-foreground: 21 74% 29%;
 
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
+    --accent: 40 100% 59%;     /* #FFB82E */
+    --accent-foreground: 23 65% 27%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 221 83% 53%;
+    --border: 42 79% 84%;      /* #F7E4B6 */
+    --input: 42 79% 84%;
+    --ring: 43 100% 59%;       /* #FFC52E */
 
-    --radius: 0.75rem;
+    --radius: 1.25rem;
   }
 }
 
 body {
-  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #713B18;
+  background-color: #FFF8E8;
   -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Baloo 2', 'Nunito Sans', cursive, sans-serif;
+}
+
+/* Custom Signature Reference Button Component */
+.btn-primary-gradient {
+  background: linear-gradient(110deg, #FFD45A 0%, #FFC52E 55%, #FFB82E 100%);
+  color: #713B18;
+  font-weight: 800;
+  border-radius: 20px;
+  box-shadow: 0 4px 14px 0 rgba(242, 140, 40, 0.3);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-primary-gradient:hover:not(:disabled) {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px 0 rgba(242, 140, 40, 0.45);
+}
+
+.btn-primary-gradient:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.btn-primary-gradient:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 197, 46, 0.5), 0 4px 14px 0 rgba(242, 140, 40, 0.3);
+}
+
+.btn-primary-gradient:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: grayscale(0.2);
+}
+
+/* Secondary Warm Button */
+.btn-warm-secondary {
+  background-color: #FFF0D2;
+  color: #713B18;
+  font-weight: 700;
+  border: 1.5px solid #F7E4B6;
+  border-radius: 18px;
+  transition: all 0.2s ease;
+}
+
+.btn-warm-secondary:hover:not(:disabled) {
+  background-color: #FFE4B5;
+  border-color: #FFB82E;
+  color: #843B13;
 }

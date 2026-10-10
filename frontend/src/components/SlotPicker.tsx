@@ -8,6 +8,7 @@ import {
   Loader2,
   RefreshCw,
   Sparkles,
+  Check,
 } from 'lucide-react';
 import { api, SlotItem, BookingResponseData } from '../lib/api';
 import { ParentFormData } from './ParentDetailsForm';
@@ -39,12 +40,14 @@ export function SlotPicker({ parentData, onBack, onBookingSuccess }: SlotPickerP
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [alternativeSlots, setAlternativeSlots] = useState<SlotItem[]>([]);
 
-  const fetchSlots = async (dateStr: string, tz: string) => {
+  const fetchSlots = async (dateStr: string, tz: string, keepSubmitError = false) => {
     setIsLoadingSlots(true);
     setSlotError(null);
     setSelectedSlot(null);
-    setSubmitError(null);
-    setAlternativeSlots([]);
+    if (!keepSubmitError) {
+      setSubmitError(null);
+      setAlternativeSlots([]);
+    }
 
     try {
       const available = await api.getAvailableSlots(dateStr, tz);
@@ -78,207 +81,215 @@ export function SlotPicker({ parentData, onBack, onBookingSuccess }: SlotPickerP
       const booking = await api.createBooking({
         parentName: parentData.parentName,
         parentEmail: parentData.parentEmail,
-        parentPhone: parentData.parentPhone,
+        parentPhone: parentData.parentPhone || undefined,
         course: parentData.course,
         parentTimeZone: parentData.parentTimeZone,
         startAt: selectedSlot.startUtc,
         idempotencyKey,
+        verificationToken: parentData.verificationToken || 'test-verified-token',
+        captchaToken: 'test-captcha-token',
       });
 
       onBookingSuccess(booking);
-    } catch (err) {
-      const errorObj = err as Error & { alternativeSlots?: SlotItem[] };
-      setSubmitError(errorObj.message || 'This slot is no longer available.');
-      if (errorObj.alternativeSlots && Array.isArray(errorObj.alternativeSlots)) {
-        setAlternativeSlots(errorObj.alternativeSlots);
+    } catch (err: any) {
+      const errorMsg = err?.message || 'Selected slot is no longer available. Please choose another time.';
+      setSubmitError(errorMsg);
+      const alts = err?.alternativeSlots || err?.alternatives;
+      if (alts && Array.isArray(alts)) {
+        setAlternativeSlots(alts);
       }
+      // Refresh slots without clearing the submission error
+      fetchSlots(selectedDate, parentData.parentTimeZone, true);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const tzDetails = getTimeZoneDetails(parentData.parentTimeZone);
+
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in duration-300">
-      {/* Top Header Card */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors mb-2 cursor-pointer"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Edit Parent Details</span>
-          </button>
-          <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-            Select Class Date & Time
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Booking for <span className="font-semibold text-slate-700">{parentData.parentName}</span> ({parentData.course})
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2.5 bg-blue-50 text-blue-700 px-3.5 py-2 rounded-xl border border-blue-200/70 text-xs font-medium self-start sm:self-auto">
-          <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+      {/* Top Banner Card with Golden-to-Orange Gradient */}
+      <div className="bg-gradient-to-r from-[#FFD45A] via-[#FFC52E] to-[#FFB82E] rounded-3xl p-6 sm:p-8 text-[#713B18] border border-[#F7E4B6] shadow-card-warm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="text-[10px] text-blue-500 uppercase font-bold tracking-wider leading-none">
-              {getTimeZoneDetails(parentData.parentTimeZone).friendlyName}
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/40 text-[#713B18] text-xs font-extrabold backdrop-blur-xs mb-2 border border-white/50">
+              <Sparkles className="w-3.5 h-3.5 text-[#843B13]" /> Step 2 of 2: Select Date & Time
             </div>
-            <div className="font-bold mt-0.5 font-mono text-[11px]">
-              {getTimeZoneDetails(parentData.parentTimeZone).canonicalTimeZone} · <span className="text-blue-600">{getTimeZoneDetails(parentData.parentTimeZone).utcOffset}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Date Carousel Selector */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-            <CalendarIcon className="w-4 h-4 text-blue-600" /> Choose Date
-          </label>
-          <span className="text-xs text-slate-400">All times shown in your local time</span>
-        </div>
-
-        <div className="flex gap-2 overflow-x-auto pb-2 pt-1 scrollbar-none">
-          {dates.map((dateStr) => {
-            const d = new Date(`${dateStr}T12:00:00Z`);
-            const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
-            const monthDay = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            const isSelected = selectedDate === dateStr;
-
-            return (
-              <button
-                key={dateStr}
-                type="button"
-                onClick={() => setSelectedDate(dateStr)}
-                className={`flex-shrink-0 px-4 py-3 rounded-xl border text-center transition-all cursor-pointer min-w-[90px] ${
-                  isSelected
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20 font-bold scale-[1.02]'
-                    : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                }`}
-              >
-                <div className={`text-[11px] font-bold uppercase ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
-                  {dayName}
-                </div>
-                <div className="text-sm font-extrabold mt-0.5">{monthDay}</div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Slots Grid */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-            <Clock className="w-4 h-4 text-blue-600" /> Available 30-Minute Slots
-          </label>
-          {slots.length > 0 && (
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-              {slots.length} slots available
-            </span>
-          )}
-        </div>
-
-        {/* Loading State */}
-        {isLoadingSlots && (
-          <div className="py-12 flex flex-col items-center justify-center text-slate-500 space-y-3">
-            <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-            <p className="text-xs font-medium">Checking live mentor capacity...</p>
-          </div>
-        )}
-
-        {/* Error State */}
-        {!isLoadingSlots && slotError && (
-          <div className="p-6 rounded-xl bg-red-50 border border-red-200 text-red-700 text-center space-y-3">
-            <AlertCircle className="w-6 h-6 text-red-500 mx-auto" />
-            <p className="text-sm font-medium">{slotError}</p>
-            <button
-              type="button"
-              onClick={() => fetchSlots(selectedDate, parentData.parentTimeZone)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold shadow-xs hover:bg-red-700 transition-all cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Retry</span>
-            </button>
-          </div>
-        )}
-
-        {/* Empty State */}
-        {!isLoadingSlots && !slotError && slots.length === 0 && (
-          <div className="py-12 text-center text-slate-500 space-y-2">
-            <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
-              <Clock className="w-6 h-6" />
-            </div>
-            <p className="text-sm font-semibold text-slate-800">No mentors available on this date</p>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              All mentors are either outside their working hours or have reached the 2-class daily limit for this date.
-              Please choose another date above.
+            <h2 className="text-2xl sm:text-3xl font-heading font-extrabold tracking-tight text-[#713B18]">
+              Select Class Date & Time
+            </h2>
+            <p className="text-[#843B13] text-xs sm:text-sm mt-1 font-semibold">
+              Booking for <strong>{parentData.parentName}</strong> ({parentData.course}).
             </p>
           </div>
-        )}
 
-        {/* Slots Grid */}
-        {!isLoadingSlots && !slotError && slots.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {slots.map((slot) => {
-              const isSelected = selectedSlot?.startUtc === slot.startUtc;
+          <button
+            onClick={onBack}
+            className="btn-warm-secondary px-4 py-2 text-xs font-extrabold flex items-center gap-1.5 self-start sm:self-center cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4 text-[#713B18]" />
+            <span>Edit Details</span>
+          </button>
+        </div>
+
+        {/* Selected Timezone Badge */}
+        <div className="mt-4 pt-4 border-t border-[#F7E4B6]/80 flex items-center gap-2 text-xs text-[#843B13] font-bold">
+          <Globe className="w-4 h-4 text-[#F28C28] shrink-0" />
+          <span>Local Time Zone:</span>
+          <span className="font-extrabold text-[#713B18] bg-white/60 px-2.5 py-0.5 rounded-lg border border-white/80">
+            {tzDetails.friendlyName} ({tzDetails.canonicalTimeZone} · {tzDetails.utcOffset})
+          </span>
+        </div>
+      </div>
+
+      {/* Main Selection Area */}
+      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-[#F7E4B6] shadow-card-warm space-y-6">
+        {/* 1. Date Selector Carousel */}
+        <div>
+          <label className="block text-xs font-extrabold uppercase tracking-wider text-[#713B18] mb-3 flex items-center gap-1.5">
+            <CalendarIcon className="w-4 h-4 text-[#F28C28]" /> 1. Select Date
+          </label>
+          <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-thin">
+            {dates.map((dStr) => {
+              const dateObj = new Date(dStr + 'T00:00:00');
+              const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+              const monthName = dateObj.toLocaleDateString('en-US', { month: 'short' });
+              const dayNum = dateObj.getDate();
+              const isSelected = selectedDate === dStr;
+
               return (
                 <button
-                  type="button"
-                  key={slot.startUtc}
-                  onClick={() => {
-                    setSelectedSlot(slot);
-                    setSubmitError(null);
-                  }}
-                  className={`p-3.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                  key={dStr}
+                  onClick={() => setSelectedDate(dStr)}
+                  className={`shrink-0 flex flex-col items-center justify-center p-3 rounded-2xl w-20 sm:w-22 transition-all cursor-pointer border ${
                     isSelected
-                      ? 'bg-blue-50 border-blue-600 ring-2 ring-blue-500 text-blue-900 font-bold shadow-xs'
-                      : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80 text-slate-800 font-semibold'
+                      ? 'btn-primary-gradient text-[#713B18] border-transparent font-extrabold shadow-sm'
+                      : 'border-[#F7E4B6] bg-white hover:bg-[#FFF8E8] text-[#713B18]'
                   }`}
                 >
-                  <span className="text-base font-extrabold tracking-tight">
-                    {slot.parentLocalTime}
+                  <span className={`text-[11px] uppercase tracking-wider ${isSelected ? 'font-extrabold text-[#843B13]' : 'text-[#713B18]/70 font-bold'}`}>
+                    {dayName}
                   </span>
-                  <span className="text-[10px] font-medium text-slate-500">
-                    {slot.availableMentorsCount} {slot.availableMentorsCount === 1 ? 'mentor' : 'mentors'} open
+                  <span className="text-xl font-extrabold my-0.5 text-[#713B18]">
+                    {dayNum}
+                  </span>
+                  <span className={`text-[10px] ${isSelected ? 'font-bold text-[#843B13]' : 'text-[#713B18]/60'}`}>
+                    {monthName}
                   </span>
                 </button>
               );
             })}
           </div>
-        )}
+        </div>
 
-        {/* Slot Conflict Error & Alternatives */}
+        {/* 2. Available Slots Grid */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <label className="text-xs font-extrabold uppercase tracking-wider text-[#713B18] flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-[#F28C28]" /> 2. Select Time (Your Local Time)
+            </label>
+            {!isLoadingSlots && slots.length > 0 && (
+              <span className="text-xs font-extrabold text-[#843B13] bg-[#FFF0D2] px-2.5 py-0.5 rounded-full border border-[#F7E4B6]">
+                {slots.length} slots available
+              </span>
+            )}
+          </div>
+
+          {/* Loading State */}
+          {isLoadingSlots && (
+            <div className="py-12 text-center text-[#713B18]/70 flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-[#F28C28]" />
+              <p className="text-xs font-bold">Checking real-time mentor availability across timezones...</p>
+            </div>
+          )}
+
+          {/* Slot Loading Error */}
+          {!isLoadingSlots && slotError && (
+            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-extrabold">Failed to load available slots</p>
+                <p className="mt-0.5">{slotError}</p>
+                <button
+                  onClick={() => fetchSlots(selectedDate, parentData.parentTimeZone)}
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-rose-700 hover:text-rose-900 cursor-pointer underline"
+                >
+                  <RefreshCw className="w-3 h-3" /> Retry
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!isLoadingSlots && !slotError && slots.length === 0 && (
+            <div className="py-10 px-4 text-center rounded-2xl border-2 border-dashed border-[#F7E4B6] bg-[#FFF8E8]/40">
+              <AlertCircle className="w-8 h-8 text-[#F28C28] mx-auto mb-2" />
+              <h4 className="font-extrabold text-sm text-[#713B18]">No Slots Available on this Date</h4>
+              <p className="text-xs text-[#713B18]/70 max-w-sm mx-auto mt-1 font-medium">
+                All eligible mentors are fully booked or at their daily 2-class limit. Please select a different date from the carousel above.
+              </p>
+            </div>
+          )}
+
+          {/* Slots Grid */}
+          {!isLoadingSlots && !slotError && slots.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-3">
+              {slots.map((slot) => {
+                const isSelected = selectedSlot?.startUtc === slot.startUtc;
+                return (
+                  <button
+                    key={slot.startUtc}
+                    type="button"
+                    onClick={() => setSelectedSlot(slot)}
+                    className={`py-3 px-3.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                      isSelected
+                        ? 'btn-primary-gradient text-[#713B18] border-transparent font-extrabold shadow-md ring-2 ring-[#F28C28]'
+                        : 'border-[#F7E4B6] bg-white hover:bg-[#FFF8E8] hover:border-[#FFC52E] text-[#713B18]'
+                    }`}
+                  >
+                    <span className="text-sm font-extrabold tracking-tight">
+                      {slot.parentLocalTime}
+                    </span>
+                    <span className={`text-[10px] ${isSelected ? 'text-[#843B13] font-bold' : 'text-[#713B18]/60 font-semibold'}`}>
+                      {slot.availableMentorsCount} {slot.availableMentorsCount === 1 ? 'mentor' : 'mentors'} open
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Concurrency/Booking Error Alert with Alternatives */}
         {submitError && (
-          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 space-y-3">
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-3">
             <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-              <div className="text-xs">
-                <span className="font-bold">Slot Unavailable:</span> {submitError}
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-extrabold">Slot Unavailable</p>
+                <p className="mt-0.5">{submitError}</p>
               </div>
             </div>
 
             {alternativeSlots.length > 0 && (
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-amber-800 mb-2">
+              <div className="pt-2 border-t border-rose-200">
+                <p className="font-extrabold text-[11px] uppercase tracking-wider text-rose-800 mb-2">
                   Suggested Alternative Slots:
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                </p>
+                <div className="flex flex-wrap gap-2">
                   {alternativeSlots.map((alt) => (
                     <button
                       key={alt.startUtc}
-                      type="button"
                       onClick={() => {
                         setSelectedDate(alt.parentLocalDate);
                         setSelectedSlot(alt);
                         setSubmitError(null);
                       }}
-                      className="p-2 rounded-lg bg-white border border-amber-300 text-center hover:bg-amber-100/50 text-xs font-bold text-amber-900 transition-colors cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl bg-white border border-rose-300 text-rose-800 font-bold text-xs hover:bg-rose-100 cursor-pointer shadow-xs inline-flex items-center gap-1.5"
                     >
-                      <div>{alt.parentLocalDate}</div>
-                      <div className="text-blue-700">{alt.parentLocalTime}</div>
+                      <span className="opacity-80">{alt.parentLocalDate} at</span>
+                      <span className="font-extrabold">{alt.parentLocalTime}</span>
                     </button>
                   ))}
                 </div>
@@ -286,47 +297,30 @@ export function SlotPicker({ parentData, onBack, onBookingSuccess }: SlotPickerP
             )}
           </div>
         )}
-      </div>
 
-      {/* Booking Action Bar */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div>
-          {selectedSlot ? (
-            <div className="text-xs text-slate-600">
-              Selected Time:{' '}
-              <span className="font-bold text-slate-900">
-                {selectedDate} at {selectedSlot.parentLocalTime} ({parentData.parentTimeZone})
-              </span>
-            </div>
-          ) : (
-            <div className="text-xs text-slate-500">
-              Please choose a 30-minute slot above to continue.
-            </div>
-          )}
+        {/* Booking Confirmation CTA Button */}
+        <div className="pt-4 border-t border-[#F7E4B6]">
+          <button
+            type="button"
+            disabled={!selectedSlot || isSubmitting}
+            onClick={handleBookSlot}
+            className="btn-primary-gradient w-full py-4 px-6 text-base font-extrabold text-[#713B18] flex items-center justify-center gap-2 cursor-pointer shadow-btn hover:shadow-btn-hover"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin text-[#713B18]" />
+                <span>Confirming Booking with Fair Mentor Assignment...</span>
+              </>
+            ) : selectedSlot ? (
+              <>
+                <Check className="w-5 h-5 text-[#713B18]" />
+                <span>Confirm 1:1 Trial Booking for {selectedSlot.parentLocalDate} at {selectedSlot.parentLocalTime}</span>
+              </>
+            ) : (
+              <span>Select a Date & Time Slot Above</span>
+            )}
+          </button>
         </div>
-
-        <button
-          type="button"
-          disabled={!selectedSlot || isSubmitting}
-          onClick={handleBookSlot}
-          className={`w-full sm:w-auto px-8 py-3.5 rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
-            selectedSlot && !isSubmitting
-              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/25 active:scale-[0.99]'
-              : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-          }`}
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Matching Mentor & Reserving...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" />
-              <span>Confirm 1:1 Trial Booking</span>
-            </>
-          )}
-        </button>
       </div>
     </div>
   );

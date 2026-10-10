@@ -72,7 +72,7 @@ export class ResendEmailService implements IEmailService {
   private fromAddress: string;
 
   constructor(apiKey?: string, fromAddress?: string) {
-    this.apiKey = apiKey || env.RESEND_API_KEY || '';
+    this.apiKey = apiKey !== undefined ? apiKey : (env.RESEND_API_KEY || '');
     this.fromAddress = fromAddress || env.EMAIL_FROM;
   }
 
@@ -106,7 +106,18 @@ export class ResendEmailService implements IEmailService {
       };
     }
 
+    // In sandbox testing mode (onboarding@resend.dev), redirect mentor/test emails to EMAIL_OVERRIDE_RECIPIENT if configured
+    let targetRecipient = message.to;
+    let targetSubject = message.subject;
+
+    if (env.EMAIL_OVERRIDE_RECIPIENT && targetRecipient.toLowerCase() !== env.EMAIL_OVERRIDE_RECIPIENT.toLowerCase()) {
+      targetSubject = `[For ${message.to}] ${message.subject}`;
+      targetRecipient = env.EMAIL_OVERRIDE_RECIPIENT;
+    }
+
     try {
+      console.log(`📤 [Resend Dispatch] To: ${targetRecipient} (original: ${message.to}) | Subject: "${message.subject}"`);
+
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -115,8 +126,8 @@ export class ResendEmailService implements IEmailService {
         },
         body: JSON.stringify({
           from: message.from || this.fromAddress,
-          to: [message.to],
-          subject: message.subject,
+          to: [targetRecipient],
+          subject: targetSubject,
           text: message.text,
           html: message.html,
         }),
@@ -126,7 +137,7 @@ export class ResendEmailService implements IEmailService {
 
       if (!response.ok) {
         const errorDetail = data.message || response.statusText || 'Unknown Resend API error';
-        console.error(`❌ [Resend API Error ${response.status}]:`, errorDetail);
+        console.error(`❌ [Resend API Error ${response.status}] To: ${targetRecipient} | Error: ${errorDetail}`);
         return {
           success: false,
           status: 'FAILED',
@@ -135,7 +146,12 @@ export class ResendEmailService implements IEmailService {
         };
       }
 
-      await this.mockFallback.sendEmail(message);
+      console.log(`✅ [Resend Accepted] Message ID: ${data.id} | To: ${targetRecipient}`);
+      await this.mockFallback.sendEmail({
+        ...message,
+        to: targetRecipient,
+        subject: targetSubject,
+      });
 
       return {
         success: true,
@@ -143,9 +159,9 @@ export class ResendEmailService implements IEmailService {
         status: 'ACCEPTED',
         provider: 'resend',
       };
-    } catch (err: any) {
-      const errorMsg = err?.message || 'Network error connecting to Resend API';
-      console.error('❌ [Resend Exception]:', errorMsg);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Network error connecting to Resend API';
+      console.error(`❌ [Resend Exception] To: ${targetRecipient} | Exception: ${errorMsg}`);
       return {
         success: false,
         status: 'FAILED',
@@ -193,10 +209,11 @@ export class SmtpEmailService implements IEmailService {
     try {
       await this.transporter.verify();
       return { valid: true, message: `SMTP connection established successfully to ${env.SMTP_HOST}:${env.SMTP_PORT}` };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       return {
         valid: false,
-        message: `SMTP connection check failed: ${err.message || err}`,
+        message: `SMTP connection check failed: ${msg}`,
       };
     }
   }
@@ -219,8 +236,8 @@ export class SmtpEmailService implements IEmailService {
         status: 'ACCEPTED',
         provider: 'smtp',
       };
-    } catch (err: any) {
-      const errorMsg = err?.message || 'Unknown SMTP error';
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown SMTP error';
       console.error(`❌ [SMTP Email Error]: Failed to send to ${message.to}:`, errorMsg);
       return {
         success: false,
@@ -236,6 +253,10 @@ export class SmtpEmailService implements IEmailService {
  * Factory to create Email Service based on environment configuration
  */
 export function createEmailService(): IEmailService {
+  if (env.NODE_ENV === 'test') {
+    return new MockEmailService();
+  }
+
   const provider = env.EMAIL_PROVIDER || 'mock';
 
   switch (provider) {

@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { mentorService } from '../../src/services/mentor.service.js';
 import { bookingService } from '../../src/services/booking.service.js';
+import { signUserToken } from '../../src/lib/jwt.js';
 
 describe('API Endpoints Integration', () => {
   const app = createApp();
@@ -107,6 +108,7 @@ describe('API Endpoints Integration', () => {
           parentTimeZone: 'America/New_York',
           startAt: '2026-10-12T13:00:00.000Z',
           idempotencyKey: 'idem-test-1',
+          verificationToken: 'test-verified-token',
         });
 
       expect(res.status).toBe(201);
@@ -125,12 +127,12 @@ describe('API Endpoints Integration', () => {
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.status).toBe('error');
+      expect(res.body.status).toBe('fail');
     });
   });
 
   describe('GET /api/mentors/:id/schedule', () => {
-    it('returns mentor schedule with capacity limits', async () => {
+    it('returns mentor schedule with capacity limits when authenticated', async () => {
       vi.spyOn(mentorService, 'getMentorSchedule').mockResolvedValue({
         mentor: {
           id: 'mentor-1',
@@ -158,7 +160,18 @@ describe('API Endpoints Integration', () => {
         bookings: [],
       });
 
-      const res = await request(app).get('/api/mentors/mentor-1/schedule?date=2026-10-12');
+      const token = signUserToken({
+        userId: 'u1',
+        email: 'sarah@codeyoung.com',
+        name: 'Sarah Johnson',
+        role: 'MENTOR',
+        mentorId: 'mentor-1',
+      });
+
+      const res = await request(app)
+        .get('/api/mentors/mentor-1/schedule?date=2026-10-12')
+        .set('Authorization', `Bearer ${token}`);
+
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('success');
       expect(res.body.data.mentor.id).toBe('mentor-1');
@@ -166,7 +179,18 @@ describe('API Endpoints Integration', () => {
     });
 
     it('returns 400 if date query parameter is missing', async () => {
-      const res = await request(app).get('/api/mentors/mentor-1/schedule');
+      const token = signUserToken({
+        userId: 'u1',
+        email: 'sarah@codeyoung.com',
+        name: 'Sarah Johnson',
+        role: 'MENTOR',
+        mentorId: 'mentor-1',
+      });
+
+      const res = await request(app)
+        .get('/api/mentors/mentor-1/schedule')
+        .set('Authorization', `Bearer ${token}`);
+
       expect(res.status).toBe(400);
       expect(res.body.status).toBe('fail');
     });

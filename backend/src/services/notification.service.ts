@@ -234,6 +234,8 @@ export class NotificationService {
         }
 
         // 2. Dispatch real email via configured provider
+        console.log(`[Notification Outbox] Starting dispatch -> BookingID: ${notif.bookingId} | Type: ${notif.type} | Role: ${notif.recipientRole} | Recipient: ${notif.recipient}`);
+
         const sendResult = await emailService.sendEmail({
           to: notif.recipient,
           subject: notif.subject,
@@ -242,6 +244,7 @@ export class NotificationService {
         });
 
         if (sendResult.success && sendResult.status === 'ACCEPTED') {
+          console.log(`[Notification Outbox] Success -> BookingID: ${notif.bookingId} | Role: ${notif.recipientRole} | MsgId: ${sendResult.messageId || 'N/A'}`);
           await notificationRepository.update(notif.id, {
             status: NotificationStatus.ACCEPTED,
             sentAt: new Date(),
@@ -249,6 +252,7 @@ export class NotificationService {
           });
           succeeded++;
         } else {
+          console.warn(`[Notification Outbox] Failed attempt -> BookingID: ${notif.bookingId} | Role: ${notif.recipientRole} | Error: ${sendResult.error}`);
           const nextAttempt = notif.attemptCount + 1;
           const isFinalFailure = nextAttempt >= 3;
 
@@ -272,7 +276,7 @@ export class NotificationService {
           }
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('❌ [Outbox Worker Error]:', err);
     } finally {
       this.isProcessing = false;

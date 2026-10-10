@@ -134,6 +134,13 @@ class InMemoryStore {
   public bookings: InMemoryBooking[] = [];
   public notifications: Notification[] = [];
 
+  reset(): void {
+    this.mentors = [...DEFAULT_MENTORS];
+    this.parents = [];
+    this.bookings = [];
+    this.notifications = [];
+  }
+
   getMentors(): Mentor[] {
     return this.mentors.filter((m) => m.isActive);
   }

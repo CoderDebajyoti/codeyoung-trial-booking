@@ -1,80 +1,119 @@
-import { Sparkles, Globe, Calendar, Users } from 'lucide-react';
+import { Globe, Calendar, Users, Lock, LogOut, UserCheck, User } from 'lucide-react';
 import { getTimeZoneDetails } from '../lib/timezones';
+import { CodeyoungLogo } from './CodeyoungLogo';
+import { AuthUser } from '../lib/api';
 
 interface NavbarProps {
-  activeTab: 'booking' | 'mentor-schedule';
-  onTabChange: (tab: 'booking' | 'mentor-schedule') => void;
+  activeTab: 'booking' | 'login' | 'mentor-schedule';
+  onTabChange: (tab: 'booking' | 'login' | 'mentor-schedule') => void;
   selectedTimeZone: string;
+  currentUser?: AuthUser | null;
+  onOpenLogin: (tab?: 'parent' | 'mentor') => void;
+  onLogout: () => void;
 }
 
-export function Navbar({ activeTab, onTabChange, selectedTimeZone }: NavbarProps) {
+export function Navbar({
+  activeTab,
+  onTabChange,
+  selectedTimeZone,
+  currentUser,
+  onOpenLogin,
+  onLogout,
+}: NavbarProps) {
   const tzDetails = getTimeZoneDetails(selectedTimeZone);
 
   return (
-    <header className="border-b border-slate-200 bg-white/95 backdrop-blur-md sticky top-0 z-50 shadow-xs">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-2">
-        {/* Brand Logo */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-md shadow-blue-500/20">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-blue-700 to-indigo-600 bg-clip-text text-transparent">
-                Codeyoung
-              </span>
-              <span className="hidden sm:inline-flex text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                1:1 Live Trial
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 hidden md:block">
-              STEM & Coding Classes for Kids (Ages 5-17)
-            </p>
-          </div>
+    <header className="border-b border-[#F7E4B6] bg-[#FFF8E8]/95 backdrop-blur-md sticky top-0 z-50 shadow-xs">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between gap-2">
+        {/* Brand Logo & Tagline */}
+        <div
+          onClick={() => onTabChange('booking')}
+          className="flex items-center gap-3 shrink-0 cursor-pointer"
+        >
+          <CodeyoungLogo />
+          <span className="hidden sm:inline-flex text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#FFF0D2] text-[#843B13] border border-[#F7E4B6]">
+            1:1 Live Trial
+          </span>
         </div>
 
-        {/* Navigation Tabs & Timezone Badge */}
+        {/* Navigation Tabs, Auth Profile & Timezone Badge */}
         <div className="flex items-center gap-2 sm:gap-4">
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold">
+          <div className="flex items-center bg-[#FFF0D2]/80 p-1 rounded-[16px] border border-[#F7E4B6] text-xs font-semibold">
             <button
               onClick={() => onTabChange('booking')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-[12px] transition-all cursor-pointer ${
                 activeTab === 'booking'
-                  ? 'bg-white text-blue-700 shadow-xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'btn-primary-gradient text-[#713B18] shadow-sm font-extrabold'
+                  : 'text-[#713B18]/70 hover:text-[#713B18] font-bold'
               }`}
             >
               <Calendar className="w-3.5 h-3.5" />
               <span>Book Class</span>
             </button>
             <button
-              onClick={() => onTabChange('mentor-schedule')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                activeTab === 'mentor-schedule'
-                  ? 'bg-white text-blue-700 shadow-xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
+              onClick={() => {
+                if (!currentUser) {
+                  onOpenLogin('mentor');
+                } else {
+                  onTabChange('mentor-schedule');
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-[12px] transition-all cursor-pointer ${
+                activeTab === 'mentor-schedule' || (activeTab === 'login' && !currentUser)
+                  ? 'btn-primary-gradient text-[#713B18] shadow-sm font-extrabold'
+                  : 'text-[#713B18]/70 hover:text-[#713B18] font-bold'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Mentor Capacity</span>
-              <span className="sm:hidden">Mentors</span>
+              {currentUser ? <Users className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">Mentor Portal</span>
+              <span className="sm:hidden">Portal</span>
             </button>
           </div>
 
+          {/* User Auth Chip or Sign In Button */}
+          {currentUser ? (
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-[16px] border border-[#F7E4B6] shadow-xs">
+              <div className="flex items-center gap-1.5 text-xs text-[#713B18] font-extrabold">
+                <UserCheck className="w-3.5 h-3.5 text-[#F28C28]" />
+                <span className="truncate max-w-[100px] sm:max-w-[130px]">{currentUser.name}</span>
+              </div>
+              <button
+                onClick={onLogout}
+                title="Log Out"
+                className="text-[#843B13]/70 hover:text-rose-700 p-1 rounded-md cursor-pointer transition-colors"
+                aria-label="Log out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => onTabChange('login')}
+              className={`hidden md:inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1.5 rounded-[14px] border cursor-pointer transition-all ${
+                activeTab === 'login'
+                  ? 'btn-primary-gradient text-[#713B18] border-transparent'
+                  : 'text-[#843B13] hover:text-[#713B18] bg-[#FFF0D2] border-[#F7E4B6]'
+              }`}
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Parent Sign In</span>
+            </button>
+          )}
+
           {/* Standardized Time-Zone Badge with Friendly Name, Canonical IANA & UTC Offset */}
           <div
-            className="hidden sm:flex items-center gap-2.5 bg-slate-50 hover:bg-slate-100/80 px-3 py-1.5 rounded-xl border border-slate-200 transition-colors"
+            className="hidden sm:flex items-center gap-2.5 bg-white/90 hover:bg-white px-3.5 py-1.5 rounded-[16px] border border-[#F7E4B6] transition-colors shadow-xs"
             title={`${tzDetails.friendlyName} (${tzDetails.canonicalTimeZone} · ${tzDetails.utcOffset})`}
           >
-            <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+            <Globe className="w-4 h-4 text-[#F28C28] shrink-0" />
             <div className="text-left leading-tight">
-              <div className="font-bold text-slate-800 text-[11px] truncate max-w-[150px] md:max-w-[180px]">
+              <div className="font-bold text-[#713B18] text-[11px] truncate max-w-[150px] md:max-w-[180px]">
                 {tzDetails.friendlyName}
               </div>
-              <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+              <div className="text-[10px] text-[#713B18]/70 font-mono flex items-center gap-1">
                 <span>{tzDetails.canonicalTimeZone}</span>
-                <span className="text-slate-300">·</span>
-                <span className="font-semibold text-blue-700">{tzDetails.utcOffset}</span>
+                <span className="text-[#F7E4B6]">·</span>
+                <span className="font-extrabold text-[#843B13]">{tzDetails.utcOffset}</span>
               </div>
             </div>
           </div>

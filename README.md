@@ -78,12 +78,42 @@ codeyoung-trial-booking/
 
 ---
 
+## 🎨 Visual Identity & Design System
+
+The application has been completely redesigned with a warm, golden-yellow-to-orange palette inspired by Codeyoung's primary brand identity:
+
+### 1. Color Tokens (Zero Blue)
+- **Primary Golden Yellow**: `#FFD45A`
+- **Primary Gold**: `#FFC52E`
+- **Golden Orange**: `#FFB82E`
+- **Secondary Orange**: `#F28C28`
+- **Warm Cream Background**: `#FFF8E8`
+- **Pale Gold Surface**: `#FFF0D2`
+- **Soft Gold Border**: `#F7E4B6`
+- **Dark Brown Text**: `#713B18`
+- **Deep Brown Emphasis**: `#843B13`
+- **White**: `#FFFFFF`
+- **Primary Gradient**: `linear-gradient(110deg, #FFD45A 0%, #FFC52E 55%, #FFB82E 100%)`
+
+### 2. Buttons & Interactions
+- **Primary CTA Buttons**: `rounded-[20px]`, `btn-primary-gradient`, bold dark brown text (`#713B18`), subtle warm shadow elevation (`0 4px 14px 0 rgba(242, 140, 40, 0.3)`), smooth hover lift (`translateY(-1px)`).
+- **Secondary Actions**: `btn-warm-secondary` with `#FFF0D2` surface and `#F7E4B6` border.
+- **Focus Rings**: Warm golden-orange focus rings (`focus:ring-[#FFD45A]/50`).
+
+### 3. Typography Hierarchy
+- **Headings & Display**: `Baloo 2` font family (bold, friendly, rounded display typography).
+- **Body & Forms**: `Nunito Sans` font family.
+- **Buttons**: `Nunito Sans` font weight 700-800.
+- **Badges & Metadata**: `Nunito Sans` font weight 600-800 with high-contrast `#843B13` / `#713B18` text.
+
+---
+
 ## ⚙️ Technology Stack
 
 - **Frontend**: React 18, Vite, TypeScript (strict), Tailwind CSS, Lucide icons, date-fns, date-fns-tz.
 - **Backend**: Node.js (v20+), Express, TypeScript (strict), Prisma ORM, PostgreSQL, Zod, date-fns, date-fns-tz.
-- **Testing**: Vitest, Supertest, React Testing Library, JSDOM (55 automated unit & integration tests).
-- **Email**: Testable email service adapter with mock & Mailpit / SMTP support.
+- **Testing**: Vitest, Supertest, React Testing Library, JSDOM (64 automated unit & integration tests).
+- **Email**: Testable email service adapter with Resend, SMTP, Mailpit & Mock support.
 
 ---
 
@@ -140,7 +170,7 @@ npm run dev
 
 # Terminal 2: Run frontend (Port 5173)
 cd frontend
-npm run dev
+`npm run dev`
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
@@ -200,17 +230,73 @@ The booking engine handles multi-region scheduling across **US (America/New_York
 
 ---
 
-## 📧 Email Notifications & Inspection
+## 📧 Real Email Delivery & Automatic Class Reminders
 
-The backend implements a testable email service supporting both **Mock** (in-memory) and **SMTP / Mailpit** transports.
+The backend incorporates a **durable PostgreSQL outbox queue** and multi-provider email dispatch engine supporting **Resend**, **SMTP (Gmail App Passwords, SendGrid, AWS SES, Mailgun)**, **Mailpit**, and **Mock/Test** transports.
 
-When a booking is confirmed:
-1. **Parent Email**: Formatted with the class time in the **parent's local time zone**, course title, assigned mentor name, booking reference ID, and live class URL.
-2. **Mentor Notification Email**: Formatted with the class time in the **mentor's local time zone**, parent/student details, booking reference ID, and live class URL.
+### Outbox & Deduplication Architecture
+1. **Durable Persistence**: All notifications (parent booking confirmation, mentor notification, parent 30-min reminder, mentor 30-min reminder) are saved to the `notifications` table before transmission.
+2. **Mathematical Deduplication**: Unique constraint `@@unique([bookingId, type])` guarantees that concurrent worker runs or idempotent retries never send duplicate emails.
+3. **Recipient Local Time Formatting**: Every email body is localized using that recipient's specific IANA time zone (e.g. EDT for parent, IST for mentor) with meeting links and booking references.
+4. **Durable 30-Minute Reminders**: Reminders are scheduled at `booking.startAt - 30 minutes`. The background worker polls the outbox every 10 seconds and automatically delivers due reminders. If a class is created `< 30 mins` before starting, past reminders are skipped.
+5. **Worker Retries & Circuit Breaker**: Failed attempts are recorded with the provider error reason, retried with exponential backoff (up to 3 attempts), and marked `FAILED` if exceeded.
+6. **Cancellation Handling**: If a booking is cancelled, pending reminders are immediately marked `FAILED` (`Cancelled: Booking was cancelled`).
 
-### Inspecting Sent Emails
-In development and test environments, inspect recently dispatched confirmation emails via:
-- `GET http://localhost:4000/api/emails/recent`
+---
+
+### Step-by-Step Provider Setup Guide
+
+#### Option 1: Resend (Recommended for Production & Cloud Deployments)
+1. **Create Account**: Sign up at [https://resend.com](https://resend.com).
+2. **Obtain API Key**: Go to **API Keys** -> **Create API Key** with Full Access permissions.
+3. **Verify Domain**: Add and verify your domain in the Resend Domains dashboard (or for development/testing without a custom domain, use `onboarding@resend.dev` as `EMAIL_FROM` to send to your verified account email).
+4. **Configure `backend/.env`**:
+   ```env
+   EMAIL_PROVIDER=resend
+   RESEND_API_KEY=re_123456789abcdef...
+   EMAIL_FROM="Codeyoung Trial <trial@yourdomain.com>"
+   ```
+5. **Verify Delivery**:
+   ```bash
+   cd backend
+   npm run test:email -- --to=your-email@example.com
+   ```
+
+#### Option 2: Gmail SMTP (with App Password)
+1. **Enable 2-Step Verification**: Go to your Google Account settings -> Security -> 2-Step Verification.
+2. **Generate App Password**: Go to **Security** -> **2-Step Verification** -> **App passwords** (at bottom). Create an app named "Codeyoung Booking" and copy the 16-character generated password.
+3. **Configure `backend/.env`**:
+   ```env
+   EMAIL_PROVIDER=smtp
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=465
+   SMTP_SECURE=true
+   SMTP_USER=your-account@gmail.com
+   SMTP_PASS=xxxx-xxxx-xxxx-xxxx
+   EMAIL_FROM="Codeyoung <your-account@gmail.com>"
+   ```
+4. **Verify Delivery**:
+   ```bash
+   cd backend
+   npm run test:email -- --to=your-email@example.com
+   ```
+
+#### Option 3: SendGrid / Mailgun / AWS SES SMTP
+1. **SendGrid**: Host: `smtp.sendgrid.net`, Port: `587`, User: `apikey`, Pass: `SG.your_api_key`.
+2. **AWS SES**: Host: `email-smtp.us-east-1.amazonaws.com`, Port: `587`, User: `SES_SMTP_USER`, Pass: `SES_SMTP_PASS`.
+
+#### Option 4: Local Development & Mailpit / Mock
+- **Mock Mode**: Set `EMAIL_PROVIDER=mock`. Dispatches to memory and audit logs without external network requests.
+- **Mailpit**: Run Mailpit locally on port 1025, set `EMAIL_PROVIDER=mailpit`. Inspect at `http://localhost:8025`.
+
+---
+
+### Observability & Notification API Endpoints
+- `GET /api/notifications/recent` - View outbox state, delivery status (`PENDING`, `ACCEPTED`, `FAILED`), attempt count, and last error.
+- `GET /api/notifications/booking/:bookingId` - View all notifications (confirmations & reminders) tied to a specific booking reference.
+- `GET /api/notifications/verify-config` - Health-check the active email provider connection.
+- `POST /api/notifications/process-outbox` - Trigger manual outbox flush.
+- `GET /api/emails/recent` - View dispatched in-memory audit logs.
 
 ---
 
@@ -260,6 +346,41 @@ In development and test environments, inspect recently dispatched confirmation e
 - **Slot Fetching Delays / DB Connection Issues**: The backend uses an automated circuit-breaker in the repository layer. If PostgreSQL credentials fail or PostgreSQL is not running, the application fails fast to the in-memory fallback store without hanging on connection timeouts.
 - **Port Conflicts**: Ensure port `4000` (backend) and port `5173` (frontend) are free before launching dev servers.
 - **Timezone Abbreviations**: In Windows environments, `dateUtils.ts` automatically maps UTC offsets to standard regional abbreviations (`EST`, `EDT`, `BST`, `GMT`, `IST`).
+
+---
+
+---
+
+## 🔒 Security, Bot Protection & Access Control
+
+The application implements defense-in-depth security measures to protect student data, prevent automated spam, and enforce strict role-based access control:
+
+### 1. Public Booking Bot Protection (Cloudflare Turnstile)
+- Public booking submissions (`POST /api/bookings`) and authentication endpoints are protected against automated scripts and credential-stuffing bots.
+- Configurable via `CAPTCHA_ENABLED` and `TURNSTILE_SECRET_KEY`. Fails closed if verification fails.
+- Local developer and automated test runs use standard test bypass keys without weakening production security.
+
+### 2. Parent Email OTP Verification
+- Prevents invalid or fraudulent email entries before confirming trial classes.
+- Generates cryptographically secure 6-digit numeric OTPs via `crypto.randomInt`.
+- Stores only salted SHA-256 hashes with a **5-minute expiry**.
+- Enforces a **60-second resend cooldown** and locks after **3 failed attempts**.
+- Upon verification, issues a short-lived signed JWT `verificationToken` and deletes the OTP code to prevent replay attacks.
+- Dispatches codes using the existing email provider (Resend, SMTP, Mailpit, Mock).
+
+### 3. Mentor & Administrator RBAC
+- **Mentor Accounts**: Company-created credentials with bcrypt password hashing (10 rounds). Mentors are restricted to viewing only their own assigned schedule and capacity (`/api/mentors/:id/schedule`).
+- **Administrator Role**: Administrators (`admin@codeyoung.com`) can audit all mentor schedules and manage the notification outbox.
+- **Generic Error Responses**: Login failures return generic messages (`Invalid email address or password`) to prevent account enumeration.
+
+### 4. Rate Limiting & Resource Exhaustion Protection
+- **Global API Rate Limiter**: 120 requests/minute per client IP.
+- **Login Limiter**: 5 attempts per 15 minutes per IP/email.
+- **OTP Send Limiter**: 3 requests per 10 minutes per email.
+- **OTP Verify Limiter**: 5 attempts per 15 minutes per email.
+- **Booking Limiter**: 10 trial bookings per hour per client IP.
+- **Payload Size Limits**: Express body parser restricted to `50kb` to prevent memory exhaustion DoS attacks.
+- **Safe Error Handling**: Call stacks and internal database queries are stripped from production API responses.
 
 ---
 
