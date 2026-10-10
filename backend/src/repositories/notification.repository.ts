@@ -1,6 +1,9 @@
-import { PrismaClient, Notification, NotificationType, NotificationStatus, Prisma } from '@prisma/client';
-import { prisma as defaultPrisma, isDbConnected, markDbDisconnected } from '../lib/prisma.js';
+import { PrismaClient, Prisma } from '@prisma/client';
+import { Notification, NotificationType, NotificationStatus } from '../types/models.js';
+import { prisma as defaultPrisma, isDbConnected, markDbConnected, markDbDisconnected, DatabaseConnectionError } from '../lib/prisma.js';
 import { inMemoryStore } from '../lib/inMemoryStore.js';
+import { isFallbackAllowed } from '../config/env.js';
+
 
 export interface CreateNotificationData {
   bookingId: string;
@@ -27,10 +30,13 @@ export class NotificationRepository {
   async create(data: CreateNotificationData, txDb?: Prisma.TransactionClient): Promise<Notification> {
     const client = txDb || this.db;
     if (!isDbConnected() && client === defaultPrisma) {
-      return inMemoryStore.createNotification(data);
+      if (isFallbackAllowed()) {
+        return inMemoryStore.createNotification(data);
+      }
+      throw new DatabaseConnectionError('Persistent database storage is disconnected. Cannot save notification.');
     }
     try {
-      return await client.notification.upsert({
+      const notif = await client.notification.upsert({
         where: {
           bookingId_type: {
             bookingId: data.bookingId,
@@ -49,25 +55,32 @@ export class NotificationRepository {
           status: NotificationStatus.PENDING,
         },
         update: {
-          // If already exists and still pending, update content/schedule
           subject: data.subject,
           content: data.content,
           htmlContent: data.htmlContent || null,
           scheduledFor: data.scheduledFor || new Date(),
         },
       });
-    } catch {
-      markDbDisconnected();
-      return inMemoryStore.createNotification(data);
+      markDbConnected();
+      return notif;
+    } catch (error) {
+      markDbDisconnected(error);
+      if (isFallbackAllowed()) {
+        return inMemoryStore.createNotification(data);
+      }
+      throw new DatabaseConnectionError('Failed to save notification to PostgreSQL database.');
     }
   }
 
   async findPendingDue(now: Date = new Date(), limit: number = 20): Promise<Notification[]> {
     if (!isDbConnected() && this.db === defaultPrisma) {
-      return inMemoryStore.getPendingNotifications(now).slice(0, limit);
+      if (isFallbackAllowed()) {
+        return inMemoryStore.getPendingNotifications(now).slice(0, limit);
+      }
+      throw new DatabaseConnectionError('Persistent database storage is disconnected.');
     }
     try {
-      return await this.db.notification.findMany({
+      const pending = await this.db.notification.findMany({
         where: {
           status: NotificationStatus.PENDING,
           scheduledFor: {
@@ -82,73 +95,105 @@ export class NotificationRepository {
         },
         take: limit,
       });
-    } catch {
-      markDbDisconnected();
-      return inMemoryStore.getPendingNotifications(now).slice(0, limit);
+      markDbConnected();
+      return pending;
+    } catch (error) {
+      markDbDisconnected(error);
+      if (isFallbackAllowed()) {
+        return inMemoryStore.getPendingNotifications(now).slice(0, limit);
+      }
+      throw new DatabaseConnectionError('Failed to fetch pending notifications from PostgreSQL database.');
     }
   }
 
   async update(id: string, data: UpdateNotificationData): Promise<Notification | null> {
     if (!isDbConnected() && this.db === defaultPrisma) {
-      return inMemoryStore.updateNotification(id, data);
+      if (isFallbackAllowed()) {
+        return inMemoryStore.updateNotification(id, data);
+      }
+      throw new DatabaseConnectionError('Persistent database storage is disconnected.');
     }
     try {
-      return await this.db.notification.update({
+      const updated = await this.db.notification.update({
         where: { id },
         data: {
           ...data,
           updatedAt: new Date(),
         },
       });
-    } catch {
-      markDbDisconnected();
-      return inMemoryStore.updateNotification(id, data);
+      markDbConnected();
+      return updated;
+    } catch (error) {
+      markDbDisconnected(error);
+      if (isFallbackAllowed()) {
+        return inMemoryStore.updateNotification(id, data);
+      }
+      throw new DatabaseConnectionError('Failed to update notification in PostgreSQL database.');
     }
   }
 
   async findByBookingId(bookingId: string): Promise<Notification[]> {
     if (!isDbConnected() && this.db === defaultPrisma) {
-      return inMemoryStore.notifications.filter((n) => n.bookingId === bookingId);
+      if (isFallbackAllowed()) {
+        return inMemoryStore.notifications.filter((n) => n.bookingId === bookingId);
+      }
+      throw new DatabaseConnectionError('Persistent database storage is disconnected.');
     }
     try {
-      return await this.db.notification.findMany({
+      const notifications = await this.db.notification.findMany({
         where: { bookingId },
         orderBy: { createdAt: 'asc' },
       });
-    } catch {
-      markDbDisconnected();
-      return inMemoryStore.notifications.filter((n) => n.bookingId === bookingId);
+      markDbConnected();
+      return notifications;
+    } catch (error) {
+      markDbDisconnected(error);
+      if (isFallbackAllowed()) {
+        return inMemoryStore.notifications.filter((n) => n.bookingId === bookingId);
+      }
+      throw new DatabaseConnectionError('Failed to fetch notifications by booking ID from PostgreSQL database.');
     }
   }
 
   async findRecent(limit: number = 50): Promise<Notification[]> {
     if (!isDbConnected() && this.db === defaultPrisma) {
-      return [...inMemoryStore.notifications]
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-        .slice(0, limit);
+      if (isFallbackAllowed()) {
+        return [...inMemoryStore.notifications]
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(0, limit);
+      }
+      throw new DatabaseConnectionError('Persistent database storage is disconnected.');
     }
     try {
-      return await this.db.notification.findMany({
+      const notifications = await this.db.notification.findMany({
         orderBy: { createdAt: 'desc' },
         take: limit,
       });
-    } catch {
-      markDbDisconnected();
-      return [...inMemoryStore.notifications]
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-        .slice(0, limit);
+      markDbConnected();
+      return notifications;
+    } catch (error) {
+      markDbDisconnected(error);
+      if (isFallbackAllowed()) {
+        return [...inMemoryStore.notifications]
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(0, limit);
+      }
+      throw new DatabaseConnectionError('Failed to fetch recent notifications from PostgreSQL database.');
     }
   }
 
   async cancelPendingForBooking(bookingId: string): Promise<void> {
     if (!isDbConnected() && this.db === defaultPrisma) {
-      inMemoryStore.notifications
-        .filter((n) => n.bookingId === bookingId && n.status === NotificationStatus.PENDING)
-        .forEach((n) => {
-          n.status = NotificationStatus.FAILED;
-          n.lastError = 'Cancelled: Booking was cancelled or rescheduled';
-        });
-      return;
+      if (isFallbackAllowed()) {
+        inMemoryStore.notifications
+          .filter((n) => n.bookingId === bookingId && n.status === NotificationStatus.PENDING)
+          .forEach((n) => {
+            n.status = NotificationStatus.FAILED;
+            n.lastError = 'Cancelled: Booking was cancelled or rescheduled';
+          });
+        return;
+      }
+      throw new DatabaseConnectionError('Persistent database storage is disconnected.');
     }
     try {
       await this.db.notification.updateMany({
@@ -161,16 +206,22 @@ export class NotificationRepository {
           lastError: 'Cancelled: Booking was cancelled or rescheduled',
         },
       });
-    } catch {
-      markDbDisconnected();
-      inMemoryStore.notifications
-        .filter((n) => n.bookingId === bookingId && n.status === NotificationStatus.PENDING)
-        .forEach((n) => {
-          n.status = NotificationStatus.FAILED;
-          n.lastError = 'Cancelled: Booking was cancelled or rescheduled';
-        });
+      markDbConnected();
+    } catch (error) {
+      markDbDisconnected(error);
+      if (isFallbackAllowed()) {
+        inMemoryStore.notifications
+          .filter((n) => n.bookingId === bookingId && n.status === NotificationStatus.PENDING)
+          .forEach((n) => {
+            n.status = NotificationStatus.FAILED;
+            n.lastError = 'Cancelled: Booking was cancelled or rescheduled';
+          });
+        return;
+      }
+      throw new DatabaseConnectionError('Failed to cancel notifications in PostgreSQL database.');
     }
   }
 }
 
 export const notificationRepository = new NotificationRepository();
+

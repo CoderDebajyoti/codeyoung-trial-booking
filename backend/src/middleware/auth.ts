@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyUserToken, UserTokenPayload } from '../lib/jwt.js';
 
+/* eslint-disable @typescript-eslint/no-namespace */
 declare global {
   namespace Express {
     interface Request {
@@ -8,6 +9,7 @@ declare global {
     }
   }
 }
+
 
 /**
  * Validates JWT Bearer token on incoming requests.

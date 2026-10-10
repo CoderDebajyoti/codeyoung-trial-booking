@@ -3,13 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
-}
-
-enum BookingStatus {
-  CONFIRMED
-  CANCELLED
 }
 
 model Mentor {
@@ -18,7 +13,7 @@ model Mentor {
   email         String    @unique
   timeZone      String    // e.g. "Asia/Kolkata", "America/New_York", "Europe/London"
   isActive      Boolean   @default(true)
-  workDays      Int[]     @default([1, 2, 3, 4, 5]) // 1=Monday ... 7=Sunday
+  workDays      String    @default("1,2,3,4,5") // Comma-separated: 1=Monday ... 7=Sunday
   workStartHour Int       @default(9)  // Local start hour: 09:00
   workEndHour   Int       @default(17) // Local end hour: 17:00
   createdAt     DateTime  @default(now())
@@ -44,16 +39,61 @@ model Parent {
   @@map("parents")
 }
 
+model Course {
+  id            String    @id
+  title         String
+  category      String    // "Coding & Programming" | "Web Development" | "AI & Robotics" | "Mathematics & Science" | "English & Communication"
+  shortDesc     String
+  ageGroup      String    // e.g. "Ages 10-15"
+  classLevel    String?   // e.g. "Grades 5-10"
+  outcomes      String    // Comma-separated or JSON list of outcomes
+  duration      String    // e.g. "3 - 6 Months"
+  totalClasses  Int       @default(48)
+  classDuration Int       @default(60) // minutes
+  price         Float     @default(199)
+  currency      String    @default("USD")
+  icon          String?   // Icon name or emoji
+  imageUrl      String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  packages      Package[]
+  bookings      Booking[]
+
+  @@map("courses")
+}
+
+model Package {
+  id             String   @id @default(uuid())
+  courseId       String
+  name           String   // e.g. "1 Month Starter", "2 Months Foundation", "3 Months Pro", "6 Months Master"
+  durationMonths Int      // 1, 2, 3, 6
+  classesCount   Int      // e.g. 8, 16, 24, 48
+  price          Float    // Package price
+  currency       String   @default("USD")
+  discountPct    Float?   @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  course         Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@map("packages")
+}
+
 model Booking {
   id             String        @id @default(uuid())
   parentId       String
   mentorId       String
+  courseId       String?
   course         String?       @default("Coding & STEM Trial")
+  studentName    String?
   startAt        DateTime      // Stored as UTC timestamp
   endAt          DateTime      // Stored as UTC timestamp (startAt + 30 mins)
   parentTimeZone String        // e.g. "America/New_York"
   mentorTimeZone String        // e.g. "Asia/Kolkata"
-  status         BookingStatus @default(CONFIRMED)
+  status         String        @default("CONFIRMED") // "CONFIRMED" | "CANCELLED"
   demoClassUrl   String
   idempotencyKey String?       @unique
   createdAt      DateTime      @default(now())
@@ -61,6 +101,7 @@ model Booking {
 
   parent         Parent        @relation(fields: [parentId], references: [id], onDelete: Cascade)
   mentor         Mentor        @relation(fields: [mentorId], references: [id], onDelete: Cascade)
+  courseRef      Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
 
   notifications  Notification[]
 
@@ -69,29 +110,16 @@ model Booking {
   @@map("bookings")
 }
 
-enum NotificationType {
-  BOOKING_CONFIRMATION_PARENT
-  BOOKING_NOTIFICATION_MENTOR
-  CLASS_REMINDER_PARENT
-  CLASS_REMINDER_MENTOR
-}
-
-enum NotificationStatus {
-  PENDING
-  ACCEPTED
-  FAILED
-}
-
 model Notification {
   id            String             @id @default(uuid())
   bookingId     String
-  type          NotificationType
+  type          String             // "BOOKING_CONFIRMATION_PARENT" | "BOOKING_NOTIFICATION_MENTOR" | "CLASS_REMINDER_PARENT" | "CLASS_REMINDER_MENTOR"
   recipient     String
   recipientRole String             // "parent" | "mentor"
   subject       String
   content       String             // text body
   htmlContent   String?            // HTML body
-  status        NotificationStatus @default(PENDING)
+  status        String             @default("PENDING") // "PENDING" | "ACCEPTED" | "FAILED"
   scheduledFor  DateTime           @default(now())
   sentAt        DateTime?
   attemptCount  Int                @default(0)

@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.notificationService = exports.NotificationService = void 0;
-const client_1 = require("@prisma/client");
+const models_js_1 = require("../types/models.js");
 const date_fns_1 = require("date-fns");
 const notification_repository_js_1 = require("../repositories/notification.repository.js");
 const booking_repository_js_1 = require("../repositories/booking.repository.js");
@@ -26,7 +26,7 @@ class NotificationService {
         // 1. Parent Confirmation Notification
         const parentConfirmation = {
             bookingId: booking.id,
-            type: client_1.NotificationType.BOOKING_CONFIRMATION_PARENT,
+            type: models_js_1.NotificationType.BOOKING_CONFIRMATION_PARENT,
             recipient: booking.parent.email,
             recipientRole: 'parent',
             subject: `Codeyoung Booking Confirmed: 1:1 Trial Class (${course})`,
@@ -68,7 +68,7 @@ class NotificationService {
         // 2. Mentor Assignment Notification
         const mentorNotification = {
             bookingId: booking.id,
-            type: client_1.NotificationType.BOOKING_NOTIFICATION_MENTOR,
+            type: models_js_1.NotificationType.BOOKING_NOTIFICATION_MENTOR,
             recipient: booking.mentor.email,
             recipientRole: 'mentor',
             subject: `New 1:1 Trial Class Assigned: ${course} with ${booking.parent.name}`,
@@ -112,7 +112,7 @@ class NotificationService {
         if (reminderScheduledTime > now) {
             const parentReminder = {
                 bookingId: booking.id,
-                type: client_1.NotificationType.CLASS_REMINDER_PARENT,
+                type: models_js_1.NotificationType.CLASS_REMINDER_PARENT,
                 recipient: booking.parent.email,
                 recipientRole: 'parent',
                 subject: `Reminder: Your Codeyoung Trial Class Starts in 30 Minutes!`,
@@ -149,7 +149,7 @@ class NotificationService {
             };
             const mentorReminder = {
                 bookingId: booking.id,
-                type: client_1.NotificationType.CLASS_REMINDER_MENTOR,
+                type: models_js_1.NotificationType.CLASS_REMINDER_MENTOR,
                 recipient: booking.mentor.email,
                 recipientRole: 'mentor',
                 subject: `Reminder: Upcoming Trial Class with ${booking.parent.name} in 30 Minutes`,
@@ -203,9 +203,9 @@ class NotificationService {
                 processed++;
                 // 1. Re-verify parent booking status
                 const booking = await booking_repository_js_1.bookingRepository.findById(notif.bookingId);
-                if (!booking || booking.status === client_1.BookingStatus.CANCELLED) {
+                if (!booking || booking.status === models_js_1.BookingStatus.CANCELLED) {
                     await notification_repository_js_1.notificationRepository.update(notif.id, {
-                        status: client_1.NotificationStatus.FAILED,
+                        status: models_js_1.NotificationStatus.FAILED,
                         lastError: 'Skipped: Booking was cancelled or deleted',
                     });
                     failed++;
@@ -222,7 +222,7 @@ class NotificationService {
                 if (sendResult.success && sendResult.status === 'ACCEPTED') {
                     console.log(`[Notification Outbox] Success -> BookingID: ${notif.bookingId} | Role: ${notif.recipientRole} | MsgId: ${sendResult.messageId || 'N/A'}`);
                     await notification_repository_js_1.notificationRepository.update(notif.id, {
-                        status: client_1.NotificationStatus.ACCEPTED,
+                        status: models_js_1.NotificationStatus.ACCEPTED,
                         sentAt: new Date(),
                         lastError: null,
                     });
@@ -234,7 +234,7 @@ class NotificationService {
                     const isFinalFailure = nextAttempt >= 3;
                     if (isFinalFailure) {
                         await notification_repository_js_1.notificationRepository.update(notif.id, {
-                            status: client_1.NotificationStatus.FAILED,
+                            status: models_js_1.NotificationStatus.FAILED,
                             attemptCount: nextAttempt,
                             lastError: sendResult.error || 'Max delivery attempts exceeded',
                         });
@@ -244,7 +244,7 @@ class NotificationService {
                         // Exponential backoff for retry: next attempt in nextAttempt * 2 minutes
                         const retryScheduled = (0, date_fns_1.addMinutes)(new Date(), nextAttempt * 2);
                         await notification_repository_js_1.notificationRepository.update(notif.id, {
-                            status: client_1.NotificationStatus.PENDING,
+                            status: models_js_1.NotificationStatus.PENDING,
                             attemptCount: nextAttempt,
                             lastError: sendResult.error || 'Provider rejected email dispatch',
                             scheduledFor: retryScheduled,

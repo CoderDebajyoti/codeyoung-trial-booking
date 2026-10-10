@@ -2,14 +2,22 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { inMemoryStore } from '../../src/lib/inMemoryStore.js';
-import { env } from '../../src/config/env.js';
+import { prisma } from '../../src/lib/prisma.js';
 import { validateAndNormalizePhone } from '../../src/lib/phoneUtils.js';
+
 
 describe('Trial Booking Eligibility & Phone Normalization Integration Tests', () => {
   const app = createApp();
 
-  beforeEach(() => {
+  beforeEach(async () => {
     inMemoryStore.reset();
+    try {
+      await prisma.notification.deleteMany();
+      await prisma.booking.deleteMany();
+      await prisma.parent.deleteMany();
+    } catch {
+      // ignore
+    }
   });
 
   describe('Single Trial Class Policy Enforcement', () => {

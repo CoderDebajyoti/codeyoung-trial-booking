@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMentorSchedule = exports.getMentors = void 0;
 const mentor_service_js_1 = require("../services/mentor.service.js");
+const dateUtils_js_1 = require("../lib/dateUtils.js");
 const getMentors = async (_req, res, next) => {
     try {
         const mentors = await mentor_service_js_1.mentorService.getActiveMentors();
@@ -14,7 +15,7 @@ const getMentors = async (_req, res, next) => {
                     name: m.name,
                     email: m.email,
                     timeZone: m.timeZone,
-                    workDays: m.workDays,
+                    workDays: (0, dateUtils_js_1.parseWorkDays)(m.workDays),
                     workStartHour: m.workStartHour,
                     workEndHour: m.workEndHour,
                 })),

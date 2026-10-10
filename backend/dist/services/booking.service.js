@@ -1,14 +1,22 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bookingService = exports.BookingService = exports.TrialEligibilityError = exports.SlotUnavailableError = void 0;
+exports.bookingService = exports.BookingService = exports.TrialEligibilityError = exports.SlotUnavailableError = exports.InactiveCourseError = void 0;
 const prisma_js_1 = require("../lib/prisma.js");
 const mentor_repository_js_1 = require("../repositories/mentor.repository.js");
 const parent_repository_js_1 = require("../repositories/parent.repository.js");
 const booking_repository_js_1 = require("../repositories/booking.repository.js");
+const course_repository_js_1 = require("../repositories/course.repository.js");
 const notification_service_js_1 = require("./notification.service.js");
 const env_js_1 = require("../config/env.js");
 const dateUtils_js_1 = require("../lib/dateUtils.js");
 const date_fns_1 = require("date-fns");
+class InactiveCourseError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'InactiveCourseError';
+    }
+}
+exports.InactiveCourseError = InactiveCourseError;
 class SlotUnavailableError extends Error {
     alternativeSlots;
     constructor(message, alternativeSlots = []) {
@@ -134,7 +142,31 @@ class BookingService {
             if (priorTrials >= env_js_1.env.MAX_TRIALS_PER_STUDENT) {
                 throw new TrialEligibilityError('This student has already used their trial class. Please contact our team to explore available courses.');
             }
-            // 3. Identify candidate mentors who are generally working during this slot
+            // 3. Course Verification & Inactive Course Protection
+            let resolvedCourseTitle = input.course || 'Coding & STEM Trial';
+            let resolvedCourseId = input.courseId || null;
+            if (input.courseId) {
+                const course = await course_repository_js_1.courseRepository.findById(input.courseId);
+                if (course) {
+                    if (!course.isActive) {
+                        throw new InactiveCourseError('The selected course is currently inactive and cannot be booked for trial classes.');
+                    }
+                    resolvedCourseTitle = course.title;
+                    resolvedCourseId = course.id;
+                }
+            }
+            else if (input.course) {
+                const allCourses = await course_repository_js_1.courseRepository.findAll(true);
+                const matchingCourse = allCourses.find((c) => c.id === input.course || c.title.toLowerCase() === input.course?.toLowerCase());
+                if (matchingCourse) {
+                    if (!matchingCourse.isActive) {
+                        throw new InactiveCourseError('The selected course is currently inactive and cannot be booked for trial classes.');
+                    }
+                    resolvedCourseTitle = matchingCourse.title;
+                    resolvedCourseId = matchingCourse.id;
+                }
+            }
+            // 4. Identify candidate mentors who are generally working during this slot
             const allMentors = await mentor_repository_js_1.mentorRepository.findAllActive();
             const candidateMentors = allMentors.filter((m) => (0, dateUtils_js_1.isWithinMentorWorkingHours)(startUtc, endUtc, m));
             if (candidateMentors.length === 0) {
@@ -142,7 +174,7 @@ class BookingService {
                 const alternatives = await this.findAlternativeSlots(parentDate, canonicalParentTz);
                 throw new SlotUnavailableError('No mentors are scheduled to work at the requested time.', alternatives);
             }
-            // 4. Execute in transaction (or in-memory transactional logic if DB is offline)
+            // 5. Execute in transaction (or in-memory transactional logic if DB is offline)
             const candidateIds = candidateMentors.map((m) => m.id);
             const executeAssignmentLogic = async (tx) => {
                 // In-transaction idempotency verification
@@ -181,8 +213,6 @@ class BookingService {
                     return null; // All candidates are busy or at capacity
                 }
                 // Fair Assignment Algorithm:
-                // Sort primarily by fewest classes assigned on that mentor-local day (ascending),
-                // tie-break deterministically by mentor ID (ascending).
                 mentorLoads.sort((a, b) => {
                     if (a.dailyCount !== b.dailyCount) {
                         return a.dailyCount - b.dailyCount;
@@ -204,7 +234,9 @@ class BookingService {
                 const newBooking = await booking_repository_js_1.bookingRepository.create({
                     parentId: parent.id,
                     mentorId: selectedMentor.id,
-                    course: input.course || 'Coding & STEM Trial',
+                    courseId: resolvedCourseId,
+                    course: resolvedCourseTitle,
+                    studentName: input.studentName || null,
                     startAt: startUtc,
                     endAt: endUtc,
                     parentTimeZone: canonicalParentTz,
@@ -219,10 +251,22 @@ class BookingService {
                 bookingResult = await prisma_js_1.prisma.$transaction(async (tx) => {
                     return executeAssignmentLogic(tx);
                 });
+                (0, prisma_js_1.markDbConnected)();
             }
-            catch {
-                // Fallback for in-memory execution when database is offline
-                bookingResult = await executeAssignmentLogic();
+            catch (error) {
+                if (error instanceof TrialEligibilityError ||
+                    error instanceof SlotUnavailableError ||
+                    error instanceof InactiveCourseError) {
+                    throw error;
+                }
+                (0, prisma_js_1.markDbDisconnected)(error);
+                if ((0, env_js_1.isFallbackAllowed)()) {
+                    console.warn('[WARN] Transaction failed; executing via in-memory store (ALLOW_IN_MEMORY_FALLBACK=true).');
+                    bookingResult = await executeAssignmentLogic();
+                }
+                else {
+                    throw new prisma_js_1.DatabaseConnectionError('Failed to record booking in database. Persistent storage is unavailable.');
+                }
             }
             if (!bookingResult) {
                 const parentDate = (0, dateUtils_js_1.getLocalDateString)(startUtc, input.parentTimeZone);
@@ -245,11 +289,20 @@ class BookingService {
         }
         return this.formatBookingResponse(booking);
     }
+    async getAdminBookings(filters) {
+        const { total, bookings } = await booking_repository_js_1.bookingRepository.findAllAdmin(filters);
+        return {
+            total,
+            bookings: bookings.map((b) => this.formatBookingResponse(b)),
+        };
+    }
     formatBookingResponse(booking) {
         return {
             id: booking.id,
             status: booking.status,
+            courseId: booking.courseId || null,
             course: booking.course || 'Coding & STEM Trial',
+            studentName: booking.studentName || null,
             demoClassUrl: booking.demoClassUrl,
             startAtUtc: booking.startAt.toISOString(),
             endAtUtc: booking.endAt.toISOString(),

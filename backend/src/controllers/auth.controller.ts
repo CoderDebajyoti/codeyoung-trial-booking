@@ -41,12 +41,13 @@ export const authController = {
         status: 'success',
         data: result,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) {
         res.status(400).json({ status: 'fail', message: err.errors[0]?.message || 'Invalid input' });
         return;
       }
-      res.status(401).json({ status: 'fail', message: err?.message || 'Authentication failed' });
+      const message = err instanceof Error ? err.message : 'Authentication failed';
+      res.status(401).json({ status: 'fail', message });
     }
   },
 
@@ -92,12 +93,13 @@ export const authController = {
           cooldownSeconds: result.cooldownSeconds,
         },
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) {
         res.status(400).json({ status: 'fail', message: err.errors[0]?.message || 'Invalid email address' });
         return;
       }
-      res.status(400).json({ status: 'fail', message: err?.message || 'Failed to send verification code' });
+      const message = err instanceof Error ? err.message : 'Failed to send verification code';
+      res.status(400).json({ status: 'fail', message });
     }
   },
 
@@ -113,12 +115,14 @@ export const authController = {
           verificationToken: result.verificationToken,
         },
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) {
         res.status(400).json({ status: 'fail', message: err.errors[0]?.message || 'Invalid input' });
         return;
       }
-      res.status(400).json({ status: 'fail', message: err?.message || 'Verification failed' });
+      const message = err instanceof Error ? err.message : 'Verification failed';
+      res.status(400).json({ status: 'fail', message });
     }
   },
+
 };

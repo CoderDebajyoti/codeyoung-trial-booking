@@ -27,7 +27,7 @@ class MentorService {
                 name: mentor.name,
                 email: mentor.email,
                 timeZone: mentor.timeZone,
-                workDays: mentor.workDays,
+                workDays: (0, dateUtils_js_1.parseWorkDays)(mentor.workDays),
                 workStartHour: mentor.workStartHour,
                 workEndHour: mentor.workEndHour,
             },

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { bookingService, SlotUnavailableError, TrialEligibilityError } from '../services/booking.service.js';
+import { bookingService, SlotUnavailableError, TrialEligibilityError, InactiveCourseError } from '../services/booking.service.js';
 import { isValidTimeZone } from '../lib/dateUtils.js';
 import { verifyCaptchaToken } from '../lib/captcha.js';
 import { verifyEmailVerificationToken } from '../lib/jwt.js';
@@ -13,6 +13,7 @@ const createBookingSchema = z.object({
   parentPhone: z.string().optional(),
   countryDialCode: z.string().optional(),
   studentName: z.string().optional(),
+  courseId: z.string().optional(),
   course: z.string().optional(),
   parentTimeZone: z.string().refine(isValidTimeZone, {
     message: 'Invalid IANA time-zone identifier',
@@ -96,6 +97,15 @@ export const createBooking = async (
       return;
     }
 
+    if (error instanceof InactiveCourseError) {
+      res.status(422).json({
+        status: 'fail',
+        message: error.message,
+        code: 'COURSE_INACTIVE',
+      });
+      return;
+    }
+
     if (error instanceof TrialEligibilityError) {
       res.status(403).json({
         status: 'fail',
@@ -166,3 +176,48 @@ export const getTrialEligibility = async (
     next(error);
   }
 };
+
+export const getAdminBookings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const {
+      search,
+      status,
+      mentorId,
+      courseId,
+      startDate,
+      endDate,
+      sortBy,
+      sortOrder,
+      page,
+      limit,
+    } = req.query;
+
+    const parsedStartDate = startDate ? new Date(startDate as string) : undefined;
+    const parsedEndDate = endDate ? new Date(endDate as string) : undefined;
+
+    const result = await bookingService.getAdminBookings({
+      search: search as string | undefined,
+      status: status as string | undefined,
+      mentorId: mentorId as string | undefined,
+      courseId: courseId as string | undefined,
+      startDate: parsedStartDate && !isNaN(parsedStartDate.getTime()) ? parsedStartDate : undefined,
+      endDate: parsedEndDate && !isNaN(parsedEndDate.getTime()) ? parsedEndDate : undefined,
+      sortBy: sortBy as any,
+      sortOrder: (sortOrder as 'asc' | 'desc') || 'desc',
+      page: page ? parseInt(page as string, 10) : 1,
+      limit: limit ? parseInt(limit as string, 10) : 25,
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

@@ -314,6 +314,22 @@ export function parseRequestedStart(startInput: string, timeZone?: string): Date
 }
 
 /**
+ * Parses workDays into a normalized number array regardless of whether stored as string or array.
+ */
+export function parseWorkDays(workDays: number[] | string | undefined | null): number[] {
+  if (Array.isArray(workDays)) {
+    return workDays;
+  }
+  if (typeof workDays === 'string') {
+    return workDays
+      .split(',')
+      .map((d) => parseInt(d.trim(), 10))
+      .filter((d) => !isNaN(d) && d >= 1 && d <= 7);
+  }
+  return [1, 2, 3, 4, 5];
+}
+
+/**
  * Checks if a requested interval [startUtc, endUtc] falls within a mentor's local working hours and working days.
  */
 export function isWithinMentorWorkingHours(
@@ -321,7 +337,7 @@ export function isWithinMentorWorkingHours(
   endUtc: Date,
   mentor: {
     timeZone: string;
-    workDays: number[];
+    workDays: number[] | string;
     workStartHour: number;
     workEndHour: number;
   }
@@ -337,10 +353,13 @@ export function isWithinMentorWorkingHours(
   const jsDayEnd = endZoned.getDay();
   const mentorDayEnd = jsDayEnd === 0 ? 7 : jsDayEnd;
 
+  const activeWorkDays = parseWorkDays(mentor.workDays);
+
   // Must be on a configured work day
-  if (!mentor.workDays.includes(mentorDayStart)) {
+  if (!activeWorkDays.includes(mentorDayStart)) {
     return false;
   }
+
 
   // Cross-midnight shifts are currently disallowed per policy
   if (mentorDayStart !== mentorDayEnd) {

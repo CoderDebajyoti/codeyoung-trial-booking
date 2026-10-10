@@ -1,10 +1,13 @@
-import { Mentor, Prisma } from '@prisma/client';
-import { prisma } from '../lib/prisma.js';
+import { Prisma } from '@prisma/client';
+import { Mentor } from '../types/models.js';
+import { prisma, DatabaseConnectionError, markDbConnected, markDbDisconnected } from '../lib/prisma.js';
 import { mentorRepository } from '../repositories/mentor.repository.js';
 import { parentRepository } from '../repositories/parent.repository.js';
-import { bookingRepository, BookingWithRelations } from '../repositories/booking.repository.js';
+import { bookingRepository, BookingWithRelations, AdminBookingFilters } from '../repositories/booking.repository.js';
+import { courseRepository } from '../repositories/course.repository.js';
 import { notificationService } from './notification.service.js';
-import { env } from '../config/env.js';
+import { env, isFallbackAllowed } from '../config/env.js';
+
 import {
   CLASS_DURATION_MINUTES,
   isValidTimeZone,
@@ -17,15 +20,25 @@ import {
 } from '../lib/dateUtils.js';
 import { addMinutes, addDays } from 'date-fns';
 
+export class InactiveCourseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InactiveCourseError';
+  }
+}
+
 export interface CreateBookingInput {
   parentName: string;
   parentEmail: string;
   parentPhone?: string;
+  studentName?: string;
+  courseId?: string;
   course?: string;
   parentTimeZone: string;
   startAt: string; // ISO string or "YYYY-MM-DD HH:mm"
   idempotencyKey?: string;
 }
+
 
 export interface SlotAvailability {
   startUtc: string;
@@ -39,7 +52,9 @@ export interface SlotAvailability {
 export interface FormattedBookingResponse {
   id: string;
   status: string;
+  courseId: string | null;
   course: string;
+  studentName: string | null;
   demoClassUrl: string;
   startAtUtc: string;
   endAtUtc: string;
@@ -221,7 +236,7 @@ export class BookingService {
       // 2. Pre-check Trial Eligibility (1 confirmed trial per student/parent by default)
       const priorTrials = await bookingRepository.countConfirmedTrialsForParentOrStudent(
         input.parentEmail,
-        (input as any).studentName
+        input.studentName
       );
       if (priorTrials >= env.MAX_TRIALS_PER_STUDENT) {
         throw new TrialEligibilityError(
@@ -229,165 +244,208 @@ export class BookingService {
         );
       }
 
-    // 3. Identify candidate mentors who are generally working during this slot
-    const allMentors = await mentorRepository.findAllActive();
-    const candidateMentors = allMentors.filter((m) =>
-      isWithinMentorWorkingHours(startUtc, endUtc, m)
-    );
+      // 3. Course Verification & Inactive Course Protection
+      let resolvedCourseTitle = input.course || 'Coding & STEM Trial';
+      let resolvedCourseId = input.courseId || null;
 
-    if (candidateMentors.length === 0) {
-      const parentDate = getLocalDateString(startUtc, canonicalParentTz);
-      const alternatives = await this.findAlternativeSlots(parentDate, canonicalParentTz);
-      throw new SlotUnavailableError(
-        'No mentors are scheduled to work at the requested time.',
-        alternatives
-      );
-    }
-
-    // 4. Execute in transaction (or in-memory transactional logic if DB is offline)
-    const candidateIds = candidateMentors.map((m) => m.id);
-
-    const executeAssignmentLogic = async (
-      tx?: Prisma.TransactionClient
-    ): Promise<BookingWithRelations | null> => {
-      // In-transaction idempotency verification
-      if (input.idempotencyKey) {
-        const existingTx = await bookingRepository.findByIdempotencyKey(input.idempotencyKey, tx);
-        if (existingTx) {
-          return existingTx;
+      if (input.courseId) {
+        const course = await courseRepository.findById(input.courseId);
+        if (course) {
+          if (!course.isActive) {
+            throw new InactiveCourseError('The selected course is currently inactive and cannot be booked for trial classes.');
+          }
+          resolvedCourseTitle = course.title;
+          resolvedCourseId = course.id;
+        }
+      } else if (input.course) {
+        const allCourses = await courseRepository.findAll(true);
+        const matchingCourse = allCourses.find(
+          (c) => c.id === input.course || c.title.toLowerCase() === input.course?.toLowerCase()
+        );
+        if (matchingCourse) {
+          if (!matchingCourse.isActive) {
+            throw new InactiveCourseError('The selected course is currently inactive and cannot be booked for trial classes.');
+          }
+          resolvedCourseTitle = matchingCourse.title;
+          resolvedCourseId = matchingCourse.id;
         }
       }
 
-      // In-transaction trial eligibility check to prevent concurrent duplicate trial bookings
-      const inTxTrials = await bookingRepository.countConfirmedTrialsForParentOrStudent(
-        input.parentEmail,
-        (input as any).studentName,
-        tx
+      // 4. Identify candidate mentors who are generally working during this slot
+      const allMentors = await mentorRepository.findAllActive();
+      const candidateMentors = allMentors.filter((m) =>
+        isWithinMentorWorkingHours(startUtc, endUtc, m)
       );
-      if (inTxTrials >= env.MAX_TRIALS_PER_STUDENT) {
-        throw new TrialEligibilityError(
-          'This student has already used their trial class. Please contact our team to explore available courses.'
+
+      if (candidateMentors.length === 0) {
+        const parentDate = getLocalDateString(startUtc, canonicalParentTz);
+        const alternatives = await this.findAlternativeSlots(parentDate, canonicalParentTz);
+        throw new SlotUnavailableError(
+          'No mentors are scheduled to work at the requested time.',
+          alternatives
         );
       }
 
-      // Explicitly lock candidate mentor records in deterministic ID order
-      if (tx) {
-        await mentorRepository.lockMentorsByIds(tx, candidateIds);
-      }
+      // 5. Execute in transaction (or in-memory transactional logic if DB is offline)
+      const candidateIds = candidateMentors.map((m) => m.id);
 
-      // Evaluate eligibility and current daily load inside the transaction
-      const mentorLoads: Array<{ mentor: Mentor; dailyCount: number }> = [];
+      const executeAssignmentLogic = async (
+        tx?: Prisma.TransactionClient
+      ): Promise<BookingWithRelations | null> => {
+        // In-transaction idempotency verification
+        if (input.idempotencyKey) {
+          const existingTx = await bookingRepository.findByIdempotencyKey(input.idempotencyKey, tx);
+          if (existingTx) {
+            return existingTx;
+          }
+        }
 
-      for (const mentor of candidateMentors) {
-        // Double-check overlapping bookings inside transaction
-        const overlaps = await bookingRepository.findOverlappingConfirmedBookings(
-          mentor.id,
-          startUtc,
-          endUtc,
+        // In-transaction trial eligibility check to prevent concurrent duplicate trial bookings
+        const inTxTrials = await bookingRepository.countConfirmedTrialsForParentOrStudent(
+          input.parentEmail,
+          input.studentName,
           tx
         );
 
-        if (overlaps.length > 0) {
-          continue; // Mentor has a conflicting booking
+        if (inTxTrials >= env.MAX_TRIALS_PER_STUDENT) {
+          throw new TrialEligibilityError(
+            'This student has already used their trial class. Please contact our team to explore available courses.'
+          );
         }
 
-        // Calculate mentor's local calendar day window
-        const mentorLocalDate = getLocalDateString(startUtc, mentor.timeZone);
-        const { startUtc: mentorDayStart, endUtc: mentorDayEnd } = getLocalDayUtcRange(
-          mentorLocalDate,
-          mentor.timeZone
-        );
+        // Explicitly lock candidate mentor records in deterministic ID order
+        if (tx) {
+          await mentorRepository.lockMentorsByIds(tx, candidateIds);
+        }
 
-        const dailyCount = await bookingRepository.countMentorConfirmedInUtcRange(
-          mentor.id,
-          mentorDayStart,
-          mentorDayEnd,
+        // Evaluate eligibility and current daily load inside the transaction
+        const mentorLoads: Array<{ mentor: Mentor; dailyCount: number }> = [];
+
+        for (const mentor of candidateMentors) {
+          // Double-check overlapping bookings inside transaction
+          const overlaps = await bookingRepository.findOverlappingConfirmedBookings(
+            mentor.id,
+            startUtc,
+            endUtc,
+            tx
+          );
+
+          if (overlaps.length > 0) {
+            continue; // Mentor has a conflicting booking
+          }
+
+          // Calculate mentor's local calendar day window
+          const mentorLocalDate = getLocalDateString(startUtc, mentor.timeZone);
+          const { startUtc: mentorDayStart, endUtc: mentorDayEnd } = getLocalDayUtcRange(
+            mentorLocalDate,
+            mentor.timeZone
+          );
+
+          const dailyCount = await bookingRepository.countMentorConfirmedInUtcRange(
+            mentor.id,
+            mentorDayStart,
+            mentorDayEnd,
+            tx
+          );
+
+          if (dailyCount < 2) {
+            mentorLoads.push({ mentor, dailyCount });
+          }
+        }
+
+        if (mentorLoads.length === 0) {
+          return null; // All candidates are busy or at capacity
+        }
+
+        // Fair Assignment Algorithm:
+        mentorLoads.sort((a, b) => {
+          if (a.dailyCount !== b.dailyCount) {
+            return a.dailyCount - b.dailyCount;
+          }
+          return a.mentor.id.localeCompare(b.mentor.id);
+        });
+
+        const selectedMentor = mentorLoads[0]!.mentor;
+
+        // Find or create parent
+        const parent = await parentRepository.findOrCreate(
+          {
+            name: input.parentName,
+            email: input.parentEmail,
+            phone: input.parentPhone,
+            timeZone: canonicalParentTz,
+          },
           tx
         );
 
-        if (dailyCount < 2) {
-          mentorLoads.push({ mentor, dailyCount });
+        // Generate configurable demo class meeting URL
+        const baseUrl = env.DEMO_CLASS_BASE_URL.replace(/\/+$/, '');
+        const demoClassUrl = `${baseUrl}/${Math.random().toString(36).substring(2, 9)}`;
+
+        // Create confirmed booking
+        const newBooking = await bookingRepository.create(
+          {
+            parentId: parent.id,
+            mentorId: selectedMentor.id,
+            courseId: resolvedCourseId,
+            course: resolvedCourseTitle,
+            studentName: input.studentName || null,
+            startAt: startUtc,
+            endAt: endUtc,
+            parentTimeZone: canonicalParentTz,
+            mentorTimeZone: normalizeTimeZone(selectedMentor.timeZone),
+            demoClassUrl,
+            idempotencyKey: input.idempotencyKey || null,
+          },
+          tx
+        );
+
+        return newBooking;
+      };
+
+      let bookingResult: BookingWithRelations | null = null;
+      try {
+        bookingResult = await prisma.$transaction(async (tx) => {
+          return executeAssignmentLogic(tx);
+        });
+        markDbConnected();
+      } catch (error) {
+        if (
+          error instanceof TrialEligibilityError ||
+          error instanceof SlotUnavailableError ||
+          error instanceof InactiveCourseError
+        ) {
+          throw error;
+        }
+        markDbDisconnected(error);
+        if (isFallbackAllowed()) {
+          console.warn('[WARN] Transaction failed; executing via in-memory store (ALLOW_IN_MEMORY_FALLBACK=true).');
+          bookingResult = await executeAssignmentLogic();
+        } else {
+          throw new DatabaseConnectionError(
+            'Failed to record booking in database. Persistent storage is unavailable.'
+          );
         }
       }
 
-      if (mentorLoads.length === 0) {
-        return null; // All candidates are busy or at capacity
+      if (!bookingResult) {
+        const parentDate = getLocalDateString(startUtc, input.parentTimeZone);
+        const alternatives = await this.findAlternativeSlots(parentDate, input.parentTimeZone);
+        throw new SlotUnavailableError(
+          'All eligible mentors are fully booked or at maximum daily capacity for this time slot.',
+          alternatives
+        );
       }
 
-      // Fair Assignment Algorithm:
-      // Sort primarily by fewest classes assigned on that mentor-local day (ascending),
-      // tie-break deterministically by mentor ID (ascending).
-      mentorLoads.sort((a, b) => {
-        if (a.dailyCount !== b.dailyCount) {
-          return a.dailyCount - b.dailyCount;
-        }
-        return a.mentor.id.localeCompare(b.mentor.id);
+      // Queue durable notifications (immediate confirmations + 30-min reminders)
+      await notificationService.queueBookingNotifications(bookingResult);
+
+      // Trigger immediate asynchronous outbox dispatch
+      notificationService.processOutbox().catch((err) => {
+        console.error('Failed in initial outbox dispatch:', err);
       });
 
-      const selectedMentor = mentorLoads[0]!.mentor;
-
-      // Find or create parent
-      const parent = await parentRepository.findOrCreate(
-        {
-          name: input.parentName,
-          email: input.parentEmail,
-          phone: input.parentPhone,
-          timeZone: canonicalParentTz,
-        },
-        tx
-      );
-
-      // Generate configurable demo class meeting URL
-      const baseUrl = env.DEMO_CLASS_BASE_URL.replace(/\/+$/, '');
-      const demoClassUrl = `${baseUrl}/${Math.random().toString(36).substring(2, 9)}`;
-
-      // Create confirmed booking
-      const newBooking = await bookingRepository.create(
-        {
-          parentId: parent.id,
-          mentorId: selectedMentor.id,
-          course: input.course || 'Coding & STEM Trial',
-          startAt: startUtc,
-          endAt: endUtc,
-          parentTimeZone: canonicalParentTz,
-          mentorTimeZone: normalizeTimeZone(selectedMentor.timeZone),
-          demoClassUrl,
-          idempotencyKey: input.idempotencyKey || null,
-        },
-        tx
-      );
-
-      return newBooking;
-    };
-
-    let bookingResult: BookingWithRelations | null = null;
-    try {
-      bookingResult = await prisma.$transaction(async (tx) => {
-        return executeAssignmentLogic(tx);
-      });
-    } catch {
-      // Fallback for in-memory execution when database is offline
-      bookingResult = await executeAssignmentLogic();
-    }
-
-    if (!bookingResult) {
-      const parentDate = getLocalDateString(startUtc, input.parentTimeZone);
-      const alternatives = await this.findAlternativeSlots(parentDate, input.parentTimeZone);
-      throw new SlotUnavailableError(
-        'All eligible mentors are fully booked or at maximum daily capacity for this time slot.',
-        alternatives
-      );
-    }
-
-    // Queue durable notifications (immediate confirmations + 30-min reminders)
-    await notificationService.queueBookingNotifications(bookingResult);
-
-    // Trigger immediate asynchronous outbox dispatch
-    notificationService.processOutbox().catch((err) => {
-      console.error('Failed in initial outbox dispatch:', err);
-    });
-
-    return this.formatBookingResponse(bookingResult);
+      return this.formatBookingResponse(bookingResult);
     });
   }
 
@@ -399,11 +457,23 @@ export class BookingService {
     return this.formatBookingResponse(booking);
   }
 
+  async getAdminBookings(
+    filters: AdminBookingFilters
+  ): Promise<{ total: number; bookings: FormattedBookingResponse[] }> {
+    const { total, bookings } = await bookingRepository.findAllAdmin(filters);
+    return {
+      total,
+      bookings: bookings.map((b) => this.formatBookingResponse(b)),
+    };
+  }
+
   private formatBookingResponse(booking: BookingWithRelations): FormattedBookingResponse {
     return {
       id: booking.id,
       status: booking.status,
+      courseId: booking.courseId || null,
       course: booking.course || 'Coding & STEM Trial',
+      studentName: booking.studentName || null,
       demoClassUrl: booking.demoClassUrl,
       startAtUtc: booking.startAt.toISOString(),
       endAtUtc: booking.endAt.toISOString(),

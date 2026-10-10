@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { mentorService } from '../services/mentor.service.js';
+import { parseWorkDays } from '../lib/dateUtils.js';
 
 export const getMentors = async (
   _req: Request,
@@ -17,12 +18,13 @@ export const getMentors = async (
           name: m.name,
           email: m.email,
           timeZone: m.timeZone,
-          workDays: m.workDays,
+          workDays: parseWorkDays(m.workDays),
           workStartHour: m.workStartHour,
           workEndHour: m.workEndHour,
         })),
       },
     });
+
   } catch (error) {
     next(error);
   }

@@ -18,15 +18,8 @@ describe('Security, Bot Protection, OTP & RBAC Comprehensive Suite', () => {
     mentorId: 'mentor-1-aarav',
   });
 
-  const otherMentorToken = signUserToken({
-    userId: 'user-mentor-2',
-    email: 'priya.patel@codeyoung.com',
-    name: 'Priya Patel',
-    role: 'MENTOR',
-    mentorId: 'mentor-2-priya',
-  });
-
   const adminToken = signUserToken({
+
     userId: 'user-admin-1',
     email: 'admin@codeyoung.com',
     name: 'System Administrator',

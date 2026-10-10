@@ -1,7 +1,8 @@
-import { Mentor } from '@prisma/client';
+import { Mentor } from '../types/models.js';
 import { mentorRepository } from '../repositories/mentor.repository.js';
 import { bookingRepository } from '../repositories/booking.repository.js';
-import { getLocalDayUtcRange, formatLocalTime } from '../lib/dateUtils.js';
+import { getLocalDayUtcRange, formatLocalTime, parseWorkDays } from '../lib/dateUtils.js';
+
 
 export interface MentorScheduleResponse {
   mentor: {
@@ -67,8 +68,9 @@ export class MentorService {
         name: mentor.name,
         email: mentor.email,
         timeZone: mentor.timeZone,
-        workDays: mentor.workDays,
+        workDays: parseWorkDays(mentor.workDays),
         workStartHour: mentor.workStartHour,
+
         workEndHour: mentor.workEndHour,
       },
       queryDate: localDateStr,

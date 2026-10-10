@@ -4,7 +4,8 @@ import { MockEmailService, ResendEmailService } from '../../src/services/email.s
 import { NotificationService } from '../../src/services/notification.service.js';
 import { notificationRepository } from '../../src/repositories/notification.repository.js';
 import { inMemoryStore } from '../../src/lib/inMemoryStore.js';
-import { BookingStatus, NotificationType, NotificationStatus } from '@prisma/client';
+import { BookingStatus, NotificationType, NotificationStatus } from '../../src/types/models.js';
+
 
 describe('Notification & Real Email System Unit Tests', () => {
   let notificationService: NotificationService;

@@ -17,10 +17,56 @@ export interface SlotsResponse {
   };
 }
 
+export interface PackageItem {
+  id: string;
+  courseId: string;
+  name?: string;
+  duration?: string;
+  durationMonths?: number;
+  classesCount: number;
+  price: number;
+  currency: string;
+  discountPct?: number;
+  isPopular?: boolean;
+  isActive: boolean;
+}
+
+export interface CourseItem {
+  id: string;
+  title: string;
+  category: string;
+  shortDesc?: string;
+  description?: string;
+  ageGroup: string;
+  classLevel?: string | null;
+  outcomes?: string;
+  learningOutcomes?: string[];
+  duration?: string;
+  totalClasses?: number;
+  classDuration?: number;
+  price?: number;
+  basePrice?: number;
+  currency?: string;
+  icon?: string | null;
+  imageUrl?: string | null;
+  isActive: boolean;
+  packages: PackageItem[];
+}
+
+export interface CoursesResponse {
+  status: 'success';
+  data: {
+    totalCourses: number;
+    courses: CourseItem[];
+  };
+}
+
 export interface CreateBookingRequest {
   parentName: string;
+  studentName?: string;
   parentEmail: string;
   parentPhone?: string;
+  courseId?: string;
   course?: string;
   parentTimeZone: string;
   startAt: string; // UTC ISO string
@@ -32,7 +78,9 @@ export interface CreateBookingRequest {
 export interface BookingResponseData {
   id: string;
   status: string;
+  courseId: string | null;
   course: string;
+  studentName: string | null;
   demoClassUrl: string;
   startAtUtc: string;
   endAtUtc: string;
@@ -105,11 +153,32 @@ export interface MentorScheduleResponse {
   };
 }
 
+export interface AdminBookingsQuery {
+  search?: string;
+  status?: string;
+  mentorId?: string;
+  courseId?: string;
+  startDate?: string;
+  endDate?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
+}
+
+export interface AdminBookingsResponse {
+  status: 'success';
+  data: {
+    total: number;
+    bookings: BookingResponseData[];
+  };
+}
+
 export interface AuthUser {
   id: string;
   email: string;
   name: string;
-  role: 'MENTOR' | 'ADMIN';
+  role: 'MENTOR' | 'ADMIN' | 'PARENT';
   mentorId?: string;
 }
 
@@ -143,6 +212,114 @@ export const api = {
     return res.json();
   },
 
+  // -------------------------------------------------------------
+  // Course Catalogue & Packages API
+  // -------------------------------------------------------------
+  async getCourses(category?: string, includeInactive = false): Promise<CourseItem[]> {
+    const params = new URLSearchParams();
+    if (category && category !== 'All Courses') params.set('category', category);
+    if (includeInactive) params.set('includeInactive', 'true');
+    const queryStr = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`${API_BASE}/courses${queryStr}`);
+    if (!res.ok) throw new Error('Failed to fetch courses');
+    const json = await res.json();
+    if (Array.isArray(json)) return json;
+    if (json.data?.courses && Array.isArray(json.data.courses)) return json.data.courses;
+    if (Array.isArray(json.data)) return json.data;
+    return [];
+  },
+
+  async getCourseById(id: string): Promise<CourseItem> {
+    const res = await fetch(`${API_BASE}/courses/${id}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Failed to fetch course: ${id}`);
+    }
+    const json = await res.json();
+    return json.data || json;
+  },
+
+  async createCourse(data: Partial<CourseItem>): Promise<CourseItem> {
+    const token = tokenStorage.getToken();
+    const res = await fetch(`${API_BASE}/courses`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Failed to create course');
+    return json.data;
+  },
+
+  async updateCourse(id: string, data: Partial<CourseItem>): Promise<CourseItem> {
+    const token = tokenStorage.getToken();
+    const res = await fetch(`${API_BASE}/courses/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Failed to update course');
+    return json.data;
+  },
+
+  async deleteCourse(id: string): Promise<void> {
+    const token = tokenStorage.getToken();
+    const res = await fetch(`${API_BASE}/courses/${id}`, {
+      method: 'DELETE',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || 'Failed to delete course');
+    }
+  },
+
+  async upsertPackage(
+    courseIdOrData: string | (Partial<PackageItem> & { courseId: string }),
+    maybeData?: Partial<PackageItem>
+  ): Promise<PackageItem> {
+    const courseId = typeof courseIdOrData === 'string' ? courseIdOrData : courseIdOrData.courseId;
+    const payload = typeof courseIdOrData === 'string' ? maybeData : courseIdOrData;
+    const token = tokenStorage.getToken();
+    const res = await fetch(`${API_BASE}/courses/${courseId}/packages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Failed to save package');
+    return json.data;
+  },
+
+  async deletePackage(packageId: string): Promise<void> {
+    const token = tokenStorage.getToken();
+    const res = await fetch(`${API_BASE}/courses/packages/${packageId}`, {
+      method: 'DELETE',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || 'Failed to delete package');
+    }
+  },
+
+  // -------------------------------------------------------------
+  // Mentors & Slots API
+  // -------------------------------------------------------------
   async getMentors(): Promise<MentorItem[]> {
     const res = await fetch(`${API_BASE}/mentors`);
     if (!res.ok) throw new Error('Failed to fetch mentors');
@@ -182,6 +359,33 @@ export const api = {
     return json.data;
   },
 
+  async getAdminBookings(filters: AdminBookingsQuery = {}): Promise<{ total: number; bookings: BookingResponseData[] }> {
+    const token = tokenStorage.getToken();
+    const params = new URLSearchParams();
+    if (filters.search) params.append('search', filters.search);
+    if (filters.status) params.append('status', filters.status);
+    if (filters.mentorId) params.append('mentorId', filters.mentorId);
+    if (filters.courseId) params.append('courseId', filters.courseId);
+    if (filters.startDate) params.append('startDate', filters.startDate);
+    if (filters.endDate) params.append('endDate', filters.endDate);
+    if (filters.sortBy) params.append('sortBy', filters.sortBy);
+    if (filters.sortOrder) params.append('sortOrder', filters.sortOrder);
+    if (filters.page) params.append('page', String(filters.page));
+    if (filters.limit) params.append('limit', String(filters.limit));
+
+    const res = await fetch(`${API_BASE}/bookings?${params.toString()}`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+    const json: AdminBookingsResponse = await res.json();
+    if (!res.ok) {
+      throw new Error((json as any).message || 'Failed to fetch admin bookings');
+    }
+    return json.data;
+  },
+
   async checkTrialEligibility(email: string, studentName?: string): Promise<{ eligible: boolean; remainingTrials: number; maxAllowed: number; message?: string }> {
     const params = new URLSearchParams({ email });
     if (studentName) params.append('studentName', studentName);
@@ -215,7 +419,6 @@ export const api = {
   // -------------------------------------------------------------
   // Authentication & OTP API Methods
   // -------------------------------------------------------------
-
   async sendOtp(email: string, captchaToken?: string): Promise<{ success: boolean; message: string; cooldownSeconds: number }> {
     const res = await fetch(`${API_BASE}/auth/otp/send`, {
       method: 'POST',

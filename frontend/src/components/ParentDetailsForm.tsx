@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { User, Mail, Globe, ArrowRight, ShieldCheck, Sparkles, CheckCircle2, KeyRound, Loader2, AlertTriangle, GraduationCap } from 'lucide-react';
 import { POPULAR_TIMEZONES } from '../lib/timezones';
 import { PhoneCountryInput } from './PhoneCountryInput';
 import { DEFAULT_COUNTRY } from '../lib/countries';
-import { api } from '../lib/api';
+import { api, CourseItem } from '../lib/api';
 
 export interface ParentFormData {
   parentName: string;
@@ -12,6 +12,7 @@ export interface ParentFormData {
   parentPhone: string;
   countryDialCode?: string;
   course: string;
+  courseId?: string;
   parentTimeZone: string;
   verificationToken?: string;
 }
@@ -19,21 +20,25 @@ export interface ParentFormData {
 interface ParentDetailsFormProps {
   initialData: ParentFormData;
   onSubmit: (data: ParentFormData) => void;
+  preselectedCourseId?: string;
 }
 
-const COURSES = [
-  { id: 'coding-game', title: 'Coding & Game Design (Scratch / Roblox)', age: 'Ages 6-10', icon: '🎮' },
-  { id: 'python-ai', title: 'Python Programming & AI Basics', age: 'Ages 10-15', icon: '🐍' },
-  { id: 'web-dev', title: 'Web Development (HTML/CSS/JS)', age: 'Ages 12-17', icon: '💻' },
-  { id: 'math-olympiad', title: 'Math & STEM Olympiad Problem Solving', age: 'Ages 7-14', icon: '📐' },
+const FALLBACK_COURSES = [
+  { id: 'coding-game', title: 'Scratch & Game Development', ageGroup: 'Ages 6-10', icon: '🎮' },
+  { id: 'python-ai', title: 'Python Programming & AI Basics', ageGroup: 'Ages 10-15', icon: '🐍' },
+  { id: 'web-dev', title: 'Web Development (HTML, CSS & JS)', ageGroup: 'Ages 12-17', icon: '💻' },
+  { id: 'math-olympiad', title: 'Mathematics & Olympiad Logic', ageGroup: 'Ages 7-14', icon: '📐' },
 ];
 
-export function ParentDetailsForm({ initialData, onSubmit }: ParentDetailsFormProps) {
+export function ParentDetailsForm({ initialData, onSubmit, preselectedCourseId }: ParentDetailsFormProps) {
   const [formData, setFormData] = useState<ParentFormData>({
     ...initialData,
     countryDialCode: initialData.countryDialCode || DEFAULT_COUNTRY.dialCode,
   });
   const [errors, setErrors] = useState<Partial<Record<keyof ParentFormData | 'eligibility', string>>>({});
+
+  // Dynamic Course List State
+  const [courses, setCourses] = useState<CourseItem[]>([]);
 
   // OTP Verification State
   const [isOtpSent, setIsOtpSent] = useState<boolean>(false);
@@ -48,6 +53,33 @@ export function ParentDetailsForm({ initialData, onSubmit }: ParentDetailsFormPr
   // Trial Eligibility State
   const [isCheckingEligibility, setIsCheckingEligibility] = useState<boolean>(false);
   const [eligibilityError, setEligibilityError] = useState<string | null>(null);
+
+  // Fetch active courses from the backend catalogue
+  useEffect(() => {
+    let isMounted = true;
+    api.getCourses()
+      .then((data) => {
+        if (!isMounted) return;
+        const active = data.filter((c) => c.isActive);
+        setCourses(active);
+
+        // Preselect if specified by ID or match existing
+        if (preselectedCourseId) {
+          const match = active.find((c) => c.id === preselectedCourseId);
+          if (match) {
+            setFormData((prev) => ({ ...prev, course: match.title, courseId: match.id }));
+          }
+        } else if (active.length > 0 && !formData.course) {
+          setFormData((prev) => ({ ...prev, course: active[0].title, courseId: active[0].id }));
+        }
+      })
+      .catch(() => {
+        // Use fallback courses on failure
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [preselectedCourseId]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -430,13 +462,13 @@ export function ParentDetailsForm({ initialData, onSubmit }: ParentDetailsFormPr
             Select Course of Interest <span className="text-[#F28C28]">*</span>
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {COURSES.map((c) => {
-              const isSelected = formData.course === c.title;
+            {(courses.length > 0 ? courses : FALLBACK_COURSES).map((c) => {
+              const isSelected = formData.course === c.title || formData.courseId === c.id;
               return (
                 <div
                   key={c.id}
                   onClick={() => {
-                    setFormData({ ...formData, course: c.title });
+                    setFormData({ ...formData, course: c.title, courseId: c.id });
                     if (errors.course) setErrors({ ...errors, course: undefined });
                   }}
                   className={`p-4 rounded-2xl border-2 transition-all cursor-pointer text-left flex items-start gap-3 ${
@@ -445,14 +477,14 @@ export function ParentDetailsForm({ initialData, onSubmit }: ParentDetailsFormPr
                       : 'border-[#F7E4B6] bg-white hover:bg-[#FFF8E8] hover:border-[#FFC52E]'
                   }`}
                 >
-                  <span className="text-2xl shrink-0 p-1 rounded-xl bg-white/80 border border-[#F7E4B6]">{c.icon}</span>
+                  <span className="text-2xl shrink-0 p-1 rounded-xl bg-white/80 border border-[#F7E4B6]">{c.icon || '🚀'}</span>
                   <div>
                     <div className="font-extrabold text-sm text-[#713B18] leading-tight">
                       {c.title}
                     </div>
                     <div className="text-[11px] font-bold text-[#843B13] mt-1 flex items-center gap-1">
                       <Sparkles className="w-3 h-3 text-[#F28C28]" />
-                      {c.age}
+                      {c.ageGroup || (c as any).age}
                     </div>
                   </div>
                 </div>

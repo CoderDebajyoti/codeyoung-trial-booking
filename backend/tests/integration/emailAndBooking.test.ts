@@ -3,6 +3,8 @@ import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { emailService } from '../../src/services/email.service.js';
 import { signUserToken } from '../../src/lib/jwt.js';
+import { prisma } from '../../src/lib/prisma.js';
+import { inMemoryStore } from '../../src/lib/inMemoryStore.js';
 
 describe('End-to-End Booking Integration & Email Notifications', () => {
   const app = createApp();
@@ -14,8 +16,16 @@ describe('End-to-End Booking Integration & Email Notifications', () => {
     role: 'ADMIN',
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     emailService.clearSentEmails();
+    inMemoryStore.reset();
+    try {
+      await prisma.notification.deleteMany();
+      await prisma.booking.deleteMany();
+      await prisma.parent.deleteMany();
+    } catch {
+      // ignore
+    }
   });
 
   it('completes booking and dispatches confirmation emails in respective local time zones', async () => {

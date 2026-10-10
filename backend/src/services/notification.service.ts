@@ -1,5 +1,6 @@
-import { NotificationType, NotificationStatus, BookingStatus } from '@prisma/client';
+import { NotificationType, NotificationStatus, BookingStatus } from '../types/models.js';
 import { addMinutes } from 'date-fns';
+
 import { notificationRepository, CreateNotificationData } from '../repositories/notification.repository.js';
 import { bookingRepository, BookingWithRelations } from '../repositories/booking.repository.js';
 import { emailService } from './email.service.js';

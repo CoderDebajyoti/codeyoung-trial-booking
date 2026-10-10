@@ -1,30 +1,43 @@
 import { useState, useEffect } from 'react';
-import { Navbar } from './components/Navbar';
+import { Navbar, AppTab } from './components/Navbar';
 import { LoginPage } from './components/LoginPage';
 import { ParentDetailsForm, ParentFormData } from './components/ParentDetailsForm';
 import { SlotPicker } from './components/SlotPicker';
 import { BookingConfirmation } from './components/BookingConfirmation';
 import { MentorScheduleView } from './components/MentorScheduleView';
+import { CourseCatalogue } from './components/CourseCatalogue';
+import { CourseDetailsPage } from './components/CourseDetailsPage';
+import { AdminBookingsView } from './components/AdminBookingsView';
+import { AdminCourseManager } from './components/AdminCourseManager';
+import { CheckoutModal } from './components/CheckoutModal';
 import { AuthModal } from './components/AuthModal';
+import { PromoBanner } from './components/PromoBanner';
 import { getDetectedDeviceTimeZone } from './lib/timezones';
-import { BookingResponseData, AuthUser, api } from './lib/api';
+import { BookingResponseData, AuthUser, CourseItem, PackageItem, api } from './lib/api';
 import { Check, User, Calendar, Sparkles } from 'lucide-react';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'booking' | 'login' | 'mentor-schedule'>('booking');
+  const [activeTab, setActiveTab] = useState<AppTab>('explore');
   const [bookingStep, setBookingStep] = useState<1 | 2 | 3>(1);
+
+  // Selected Course / Package State for Navigation
+  const [selectedCourseId, setSelectedCourseId] = useState<string | undefined>(undefined);
+  const [selectedPackageForCheckout, setSelectedPackageForCheckout] = useState<{
+    course: CourseItem;
+    pkg: PackageItem;
+  } | null>(null);
 
   // Authentication State
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [authModalTab, setAuthModalTab] = useState<'parent' | 'mentor'>('parent');
 
-  // Form State
+  // Form State for Booking
   const [parentData, setParentData] = useState<ParentFormData>({
     parentName: '',
     parentEmail: '',
     parentPhone: '',
-    course: 'Coding & Game Design (Scratch / Roblox)',
+    course: 'Scratch & Game Development',
     parentTimeZone: getDetectedDeviceTimeZone(),
   });
 
@@ -45,14 +58,38 @@ export function App() {
     });
   }, []);
 
+  const handleSelectCourseForBooking = (course: CourseItem) => {
+    setSelectedCourseId(course.id);
+    setParentData((prev) => ({
+      ...prev,
+      course: course.title,
+      courseId: course.id,
+    }));
+    setActiveTab('booking');
+    setBookingStep(1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSelectCourseForDetails = (courseId: string) => {
+    setSelectedCourseId(courseId);
+    setActiveTab('course-details');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSelectPackageForCheckout = (course: CourseItem, pkg: PackageItem) => {
+    setSelectedPackageForCheckout({ course, pkg });
+  };
+
   const handleParentDetailsSubmit = (data: ParentFormData) => {
     setParentData(data);
     setBookingStep(2);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBookingSuccess = (booking: BookingResponseData) => {
     setConfirmedBooking(booking);
     setBookingStep(3);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBookAnother = () => {
@@ -68,8 +105,9 @@ export function App() {
         parentName: user.name || prev.parentName,
         parentEmail: user.email || prev.parentEmail,
       }));
-      setActiveTab('booking');
-      setBookingStep(1);
+      setActiveTab('explore');
+    } else if (user.role === 'ADMIN') {
+      setActiveTab('admin-bookings');
     } else {
       setActiveTab('mentor-schedule');
     }
@@ -78,7 +116,7 @@ export function App() {
   const handleLogout = async () => {
     await api.logout();
     setCurrentUser(null);
-    setActiveTab('booking');
+    setActiveTab('explore');
   };
 
   const handleOpenAuthModal = (tab: 'parent' | 'mentor' = 'parent') => {
@@ -94,6 +132,8 @@ export function App() {
         onTabChange={(tab) => {
           if (tab === 'mentor-schedule' && !currentUser) {
             handleOpenAuthModal('mentor');
+          } else if ((tab === 'admin-bookings' || tab === 'admin-courses') && currentUser?.role !== 'ADMIN') {
+            handleOpenAuthModal('mentor');
           } else {
             setActiveTab(tab);
           }
@@ -104,20 +144,42 @@ export function App() {
         onLogout={handleLogout}
       />
 
-      {/* Main Content Area */}
-      <main className={`mx-auto px-4 sm:px-6 py-6 sm:py-10 w-full flex-1 ${activeTab === 'login' ? 'max-w-7xl' : 'max-w-5xl'}`}>
-        {activeTab === 'login' && (
-          <LoginPage
-            onLoginSuccess={handleLoginSuccess}
-            onNavigateToBooking={() => {
-              setActiveTab('booking');
-              setBookingStep(1);
-            }}
+      {/* Main Content Container */}
+      <main className="mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1 max-w-7xl">
+        {/* VIEW 1: Explore Courses / Pricing Catalogue */}
+        {(activeTab === 'explore' || activeTab === 'courses' || activeTab === 'pricing') && (
+          <div className="space-y-6">
+            <PromoBanner
+              title="Give Your Child the Ultimate STEM Advantage"
+              description="Learn Coding, Game Design, Python AI, Web Dev & Olympiad Math with verified 1:1 expert mentors."
+              actionLabel="Book a Free 1:1 Trial Class"
+              onAction={() => {
+                setActiveTab('booking');
+                setBookingStep(1);
+              }}
+            />
+
+            <CourseCatalogue
+              onSelectCourse={handleSelectCourseForDetails}
+              onBookTrial={handleSelectCourseForBooking}
+              onPurchasePackage={handleSelectPackageForCheckout}
+            />
+          </div>
+        )}
+
+        {/* VIEW 2: Course Details & Configurable Pricing View */}
+        {activeTab === 'course-details' && selectedCourseId && (
+          <CourseDetailsPage
+            courseId={selectedCourseId}
+            onBack={() => setActiveTab('explore')}
+            onBookTrial={handleSelectCourseForBooking}
+            onPurchasePackage={handleSelectPackageForCheckout}
           />
         )}
 
+        {/* VIEW 3: Trial Booking Flow */}
         {activeTab === 'booking' && (
-          <div className="space-y-8">
+          <div className="space-y-8 max-w-5xl mx-auto">
             {/* Step Progress Breadcrumb */}
             {bookingStep < 3 && (
               <div className="max-w-lg mx-auto flex items-center justify-between relative">
@@ -173,15 +235,16 @@ export function App() {
               </div>
             )}
 
-            {/* Screen A: Parent Details Form */}
+            {/* Screen 1: Parent Details Form */}
             {bookingStep === 1 && (
               <ParentDetailsForm
                 initialData={parentData}
                 onSubmit={handleParentDetailsSubmit}
+                preselectedCourseId={selectedCourseId}
               />
             )}
 
-            {/* Screen B: Slot Picker */}
+            {/* Screen 2: Slot Picker */}
             {bookingStep === 2 && (
               <SlotPicker
                 parentData={parentData}
@@ -190,7 +253,7 @@ export function App() {
               />
             )}
 
-            {/* Screen C: Booking Confirmation */}
+            {/* Screen 3: Booking Confirmation */}
             {bookingStep === 3 && confirmedBooking && (
               <BookingConfirmation
                 booking={confirmedBooking}
@@ -200,7 +263,34 @@ export function App() {
           </div>
         )}
 
-        {/* Screen D: Mentor Schedule Inspector View */}
+        {/* VIEW 4: Parent & Staff Login Portal */}
+        {activeTab === 'login' && (
+          <LoginPage
+            onLoginSuccess={handleLoginSuccess}
+            onNavigateToBooking={() => {
+              setActiveTab('booking');
+              setBookingStep(1);
+            }}
+          />
+        )}
+
+        {/* VIEW 5: Admin Bookings Search, Sorting & Filter View */}
+        {activeTab === 'admin-bookings' && (
+          <AdminBookingsView
+            currentUser={currentUser}
+            onOpenLogin={() => handleOpenAuthModal('mentor')}
+          />
+        )}
+
+        {/* VIEW 6: Admin Course and Package Management */}
+        {activeTab === 'admin-courses' && (
+          <AdminCourseManager
+            currentUser={currentUser}
+            onOpenLogin={() => handleOpenAuthModal('mentor')}
+          />
+        )}
+
+        {/* VIEW 7: Mentor Schedule View */}
         {activeTab === 'mentor-schedule' && (
           <MentorScheduleView
             currentUser={currentUser}
@@ -209,7 +299,22 @@ export function App() {
         )}
       </main>
 
-      {/* Dual Parent / Mentor Authentication Modal */}
+      {/* Package Checkout Review Modal */}
+      {selectedPackageForCheckout && (
+        <CheckoutModal
+          isOpen={Boolean(selectedPackageForCheckout)}
+          course={selectedPackageForCheckout.course}
+          pkg={selectedPackageForCheckout.pkg}
+          onClose={() => setSelectedPackageForCheckout(null)}
+          onBookTrial={() => {
+            const c = selectedPackageForCheckout.course;
+            setSelectedPackageForCheckout(null);
+            handleSelectCourseForBooking(c);
+          }}
+        />
+      )}
+
+      {/* Dual Parent / Staff Authentication Modal */}
       <AuthModal
         isOpen={isLoginModalOpen}
         initialTab={authModalTab}
@@ -217,16 +322,20 @@ export function App() {
         onLoginSuccess={handleLoginSuccess}
       />
 
-      {/* Footer */}
-      <footer className="border-t border-[#F7E4B6] bg-[#FFF8E8] py-6 text-center text-xs text-[#713B18]/70">
-        <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>
-            Codeyoung Trial Class Appointment Booking &copy; 2026. All rights reserved.
-          </div>
-          <div className="flex items-center gap-4 text-[11px] text-[#713B18]/50">
-            <span>Powered by Node.js & React</span>
+      {/* Universal Footer */}
+      <footer className="border-t border-[#F7E4B6] bg-[#FFF8E8] py-8 text-center text-xs text-[#713B18]/70 mt-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2 font-bold text-[#713B18]">
+            <span>Codeyoung 1:1 Live Online STEM Education</span>
             <span>•</span>
-            <span>PostgreSQL Concurrency-Safe Engine</span>
+            <span>Global Trial Booking & Course Hub</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] font-semibold text-[#843B13]">
+            <span>Safe & Verified Mentors</span>
+            <span>•</span>
+            <span>PostgreSQL & SQLite Resilient Storage</span>
+            <span>•</span>
+            <span>© 2026 Codeyoung</span>
           </div>
         </div>
       </footer>

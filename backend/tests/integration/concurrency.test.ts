@@ -5,7 +5,8 @@ import { mentorRepository } from '../../src/repositories/mentor.repository.js';
 import { bookingRepository, CreateBookingData, BookingWithRelations } from '../../src/repositories/booking.repository.js';
 import { parentRepository } from '../../src/repositories/parent.repository.js';
 import { prisma } from '../../src/lib/prisma.js';
-import { Mentor, Parent, BookingStatus, Prisma } from '@prisma/client';
+import { Mentor, Parent, BookingStatus } from '../../src/types/models.js';
+import { Prisma } from '@prisma/client';
 
 describe('Concurrency & Race-Condition Protection Tests', () => {
   const app = createApp();

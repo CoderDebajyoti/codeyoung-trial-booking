@@ -42,6 +42,9 @@ const envSchema = z.object({
 
   // Rate Limiting
   RATE_LIMIT_ENABLED: z.string().optional().default('true').transform((val) => val !== 'false' && val !== '0'),
+
+  // Storage & Fallback Policy (Default: false to enforce persistent PostgreSQL storage)
+  ALLOW_IN_MEMORY_FALLBACK: z.string().optional().default('false').transform((val) => val === 'true' || val === '1'),
 });
 
 const parseEnv = () => {
@@ -63,3 +66,15 @@ const parseEnv = () => {
 
 export const env = parseEnv();
 export type Env = z.infer<typeof envSchema>;
+
+export function isFallbackAllowed(): boolean {
+  if (process.env.ALLOW_IN_MEMORY_FALLBACK === 'true' || process.env.ALLOW_IN_MEMORY_FALLBACK === '1') {
+    return true;
+  }
+  if (process.env.ALLOW_IN_MEMORY_FALLBACK === 'false' || process.env.ALLOW_IN_MEMORY_FALLBACK === '0') {
+    return false;
+  }
+  // In test environment, allow in-memory fallback unless explicitly disabled
+  return env.NODE_ENV === 'test';
+}
+

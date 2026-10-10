@@ -18,11 +18,11 @@ export function validateAndNormalizePhone(
     return { isValid: true }; // Phone is optional in some contexts
   }
 
-  let cleaned = rawPhone.trim();
+  const cleaned = rawPhone.trim();
 
   // If phone already starts with +, parse country code and digits
-  let dialCode = countryDialCode.startsWith('+') ? countryDialCode : `+${countryDialCode}`;
-  let digitsOnly = cleaned.replace(/\D/g, '');
+  const dialCode = countryDialCode.startsWith('+') ? countryDialCode : `+${countryDialCode}`;
+  const digitsOnly = cleaned.replace(/\D/g, '');
 
   if (cleaned.startsWith('+')) {
     // Already includes international dial code

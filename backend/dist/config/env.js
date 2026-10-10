@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.env = void 0;
+exports.isFallbackAllowed = isFallbackAllowed;
 const dotenv_1 = __importDefault(require("dotenv"));
 const zod_1 = require("zod");
 dotenv_1.default.config();
@@ -41,6 +42,8 @@ const envSchema = zod_1.z.object({
     MAX_TRIALS_PER_STUDENT: zod_1.z.string().optional().default('1').transform((val) => parseInt(val, 10)),
     // Rate Limiting
     RATE_LIMIT_ENABLED: zod_1.z.string().optional().default('true').transform((val) => val !== 'false' && val !== '0'),
+    // Storage & Fallback Policy (Default: false to enforce persistent PostgreSQL storage)
+    ALLOW_IN_MEMORY_FALLBACK: zod_1.z.string().optional().default('false').transform((val) => val === 'true' || val === '1'),
 });
 const parseEnv = () => {
     // Map EMAIL_ADAPTER to EMAIL_PROVIDER if EMAIL_ADAPTER is passed
@@ -59,3 +62,13 @@ const parseEnv = () => {
     return result.data;
 };
 exports.env = parseEnv();
+function isFallbackAllowed() {
+    if (process.env.ALLOW_IN_MEMORY_FALLBACK === 'true' || process.env.ALLOW_IN_MEMORY_FALLBACK === '1') {
+        return true;
+    }
+    if (process.env.ALLOW_IN_MEMORY_FALLBACK === 'false' || process.env.ALLOW_IN_MEMORY_FALLBACK === '0') {
+        return false;
+    }
+    // In test environment, allow in-memory fallback unless explicitly disabled
+    return exports.env.NODE_ENV === 'test';
+}
