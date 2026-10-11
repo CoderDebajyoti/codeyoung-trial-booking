@@ -223,10 +223,22 @@ export const api = {
     const res = await fetch(`${API_BASE}/courses${queryStr}`);
     if (!res.ok) throw new Error('Failed to fetch courses');
     const json = await res.json();
-    if (Array.isArray(json)) return json;
-    if (json.data?.courses && Array.isArray(json.data.courses)) return json.data.courses;
-    if (Array.isArray(json.data)) return json.data;
-    return [];
+    const rawList: CourseItem[] = Array.isArray(json)
+      ? json
+      : Array.isArray(json.data?.courses)
+      ? json.data.courses
+      : Array.isArray(json.data)
+      ? json.data
+      : [];
+
+    // Deduplicate by course ID
+    const map = new Map<string, CourseItem>();
+    rawList.forEach((c) => {
+      if (c && typeof c.id === 'string' && c.id.trim().length > 0 && !map.has(c.id)) {
+        map.set(c.id, c);
+      }
+    });
+    return Array.from(map.values());
   },
 
   async getCourseById(id: string): Promise<CourseItem> {

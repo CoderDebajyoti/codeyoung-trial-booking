@@ -11,6 +11,8 @@ import {
   Package as PackageIcon
 } from 'lucide-react';
 import { CourseItem, PackageItem, api } from '../lib/api';
+import { CourseCardImage } from './CourseCardImage';
+import { CANONICAL_COURSES, deduplicateCourses } from '../lib/courses';
 
 interface CourseCatalogueProps {
   onSelectCourse?: (courseId: string) => void;
@@ -48,7 +50,8 @@ export function CourseCatalogue({
     api.getCourses()
       .then((data) => {
         if (!isMounted) return;
-        const list = Array.isArray(data) ? data : [];
+        const rawList = Array.isArray(data) && data.length > 0 ? data : CANONICAL_COURSES;
+        const list = deduplicateCourses(rawList);
         setCourses(list);
 
         // Pre-select popular or first package for each course
@@ -61,9 +64,12 @@ export function CourseCatalogue({
         });
         setSelectedPackages(initialSelected);
       })
-      .catch((err) => {
+      .catch(() => {
         if (!isMounted) return;
-        setError(err?.message || 'Unable to load course catalogue & pricing');
+        // Fall back to canonical catalogue on network error
+        const fallbackList = deduplicateCourses(CANONICAL_COURSES);
+        setCourses(fallbackList);
+        setError(null);
       })
       .finally(() => {
         if (isMounted) setIsLoading(false);
@@ -73,7 +79,7 @@ export function CourseCatalogue({
     };
   }, []);
 
-  const courseList = Array.isArray(courses) ? courses : [];
+  const courseList = deduplicateCourses(Array.isArray(courses) && courses.length > 0 ? courses : CANONICAL_COURSES);
 
   const filteredCourses = courseList.filter((course) => {
     const matchesCategory =
@@ -221,10 +227,13 @@ export function CourseCatalogue({
                 className="bg-white rounded-3xl border border-[#F7E4B6] shadow-card-warm hover:shadow-card-hover hover:border-[#FFC52E] transition-all flex flex-col justify-between overflow-hidden group"
               >
                 <div>
-                  {/* Card Top Banner */}
-                  <div className="p-6 pb-4 border-b border-[#F7E4B6]/60 bg-gradient-to-b from-[#FFFDF9] to-white">
-                    <div className="flex items-center justify-between gap-2 mb-3">
-                      <span className="text-xs font-extrabold px-2.5 py-1 rounded-full bg-[#FFF0D2] text-[#843B13] border border-[#F7E4B6]">
+                  {/* Card Visual Artwork / Text Fallback */}
+                  <CourseCardImage course={course} variant="card" />
+
+                  {/* Card Header & Metadata */}
+                  <div className="p-6 pb-3 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-[#FFF0D2] text-[#843B13] border border-[#F7E4B6]">
                         {course.category}
                       </span>
                       <span className="text-[11px] font-bold text-[#843B13] flex items-center gap-1">
@@ -233,30 +242,25 @@ export function CourseCatalogue({
                       </span>
                     </div>
 
-                    <div className="flex items-start gap-3">
-                      <span className="text-3xl p-2 rounded-2xl bg-[#FFF0D2] border border-[#F7E4B6] shrink-0">
-                        {course.icon || '🚀'}
-                      </span>
-                      <div>
-                        <h3 className="text-lg font-heading font-extrabold text-[#713B18] group-hover:text-[#F28C28] transition-colors leading-snug">
-                          {course.title}
-                        </h3>
-                        <div className="text-[11px] font-bold text-[#843B13] mt-0.5 flex items-center gap-1">
-                          <Sparkles className="w-3 h-3 text-[#F28C28]" />
-                          <span>{course.ageGroup}</span>
-                          {course.classLevel && (
-                            <>
-                              <span>•</span>
-                              <span>{course.classLevel}</span>
-                            </>
-                          )}
-                        </div>
+                    <div>
+                      <h3 className="text-lg font-heading font-extrabold text-[#713B18] group-hover:text-[#F28C28] transition-colors leading-snug">
+                        {course.title}
+                      </h3>
+                      <div className="text-[11px] font-bold text-[#843B13] mt-1 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-[#F28C28]" />
+                        <span>{course.ageGroup}</span>
+                        {course.classLevel && (
+                          <>
+                            <span>•</span>
+                            <span>{course.classLevel}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
 
                   {/* Card Body */}
-                  <div className="p-6 space-y-4">
+                  <div className="px-6 pb-6 space-y-4">
                     <p className="text-xs text-[#843B13]/90 leading-relaxed font-medium line-clamp-2">
                       {course.description}
                     </p>

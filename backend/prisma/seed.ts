@@ -256,6 +256,23 @@ export const SEEDED_COURSES = [
     imageUrl: 'https://images.unsplash.com/photo-1455390582262-044cdead277a?w=600&auto=format&fit=crop&q=80',
     isActive: true,
   },
+  {
+    id: 'cyber-security',
+    title: 'Cyber Security & Ethical Hacking',
+    category: 'Coding & Programming',
+    shortDesc: 'Learn network protocols, security encryption, defense frameworks, and ethical cyber safety techniques.',
+    ageGroup: 'Ages 12-18',
+    classLevel: 'Grades 6-12',
+    outcomes: 'Network security fundamentals,Data encryption & cryptography,Cyber threats & ethical defense tools,Digital safety & penetration testing basics',
+    duration: '3 - 6 Months',
+    totalClasses: 48,
+    classDuration: 60,
+    price: 150,
+    currency: 'USD',
+    icon: 'Shield',
+    imageUrl: '/images/courses/cyber-security.jpg',
+    isActive: true,
+  },
 ];
 
 export async function main() {

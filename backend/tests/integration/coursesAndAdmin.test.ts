@@ -36,11 +36,11 @@ describe('Courses & Admin Bookings Management Integration Tests', () => {
   });
 
   describe('Course Catalogue Endpoints (Public & Admin)', () => {
-    it('GET /api/courses returns all active courses with packages and pricing', async () => {
+    it('GET /api/courses returns all active courses with packages and pricing and no duplicates', async () => {
       const res = await request(app).get('/api/courses');
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('success');
-      expect(res.body.data.courses.length).toBeGreaterThanOrEqual(5);
+      expect(res.body.data.courses.length).toBeGreaterThanOrEqual(10);
 
       const pythonCourse = res.body.data.courses.find((c: any) => c.id === 'python-ai');
       expect(pythonCourse).toBeDefined();
@@ -49,6 +49,35 @@ describe('Courses & Admin Bookings Management Integration Tests', () => {
       expect(pythonCourse.packages.length).toBe(4);
       expect(pythonCourse.packages[0].name).toBe('1 Month Starter');
       expect(pythonCourse.packages[0].classesCount).toBe(8);
+
+      // Verify Cyber Security course is unique and canonical
+      const cyberCourses = res.body.data.courses.filter(
+        (c: any) => c.id === 'cyber-security' || c.title.toLowerCase().includes('cyber security')
+      );
+      expect(cyberCourses.length).toBe(1);
+      expect(cyberCourses[0].id).toBe('cyber-security');
+      expect(cyberCourses[0].title).toBe('Cyber Security & Ethical Hacking');
+      expect(cyberCourses[0].packages.length).toBe(4);
+
+      // Verify all courses have unique IDs
+      const ids = res.body.data.courses.map((c: any) => c.id);
+      const uniqueIds = new Set(ids);
+      expect(uniqueIds.size).toBe(ids.length);
+    });
+
+    it('GET /api/courses/:id returns single course with complete packages for cyber-security', async () => {
+      const res = await request(app).get('/api/courses/cyber-security');
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('success');
+      expect(res.body.data.id).toBe('cyber-security');
+      expect(res.body.data.title).toBe('Cyber Security & Ethical Hacking');
+      expect(res.body.data.packages.length).toBe(4);
+      expect(res.body.data.packages.map((p: any) => p.name)).toEqual([
+        '1 Month Starter',
+        '2 Months Foundation',
+        '3 Months Pro',
+        '6 Months Master',
+      ]);
     });
 
     it('GET /api/courses/:id returns single course with complete packages', async () => {
@@ -61,16 +90,16 @@ describe('Courses & Admin Bookings Management Integration Tests', () => {
     });
 
     it('POST /api/courses allows admin to create new course and rejects unauthorized users', async () => {
-      const uniqueCourseId = `cyber-security-${Date.now()}`;
+      const uniqueCourseId = `test-course-${Date.now()}`;
 
       // 1. Unauthenticated request -> 401
       const unauthRes = await request(app).post('/api/courses').send({
         id: uniqueCourseId,
-        title: 'Cyber Security & Ethical Hacking',
-        category: 'Coding & Programming',
-        shortDesc: 'Learn network protocols, security encryption, and ethical defense techniques.',
+        title: 'Test Robotics & Drones',
+        category: 'AI & Robotics',
+        shortDesc: 'Learn drone automation, sensor calibration, and flight physics.',
         ageGroup: 'Ages 12-18',
-        outcomes: 'Network security fundamentals,Encryption principles,Ethical defense tools',
+        outcomes: 'Drone flight dynamics,Sensor calibration,Autonomous navigation',
         duration: '3 - 6 Months',
       });
       expect(unauthRes.status).toBe(401);
@@ -81,11 +110,11 @@ describe('Courses & Admin Bookings Management Integration Tests', () => {
         .set('Authorization', `Bearer ${mentorToken}`)
         .send({
           id: uniqueCourseId,
-          title: 'Cyber Security & Ethical Hacking',
-          category: 'Coding & Programming',
-          shortDesc: 'Learn network protocols, security encryption, and ethical defense techniques.',
+          title: 'Test Robotics & Drones',
+          category: 'AI & Robotics',
+          shortDesc: 'Learn drone automation, sensor calibration, and flight physics.',
           ageGroup: 'Ages 12-18',
-          outcomes: 'Network security fundamentals,Encryption principles,Ethical defense tools',
+          outcomes: 'Drone flight dynamics,Sensor calibration,Autonomous navigation',
           duration: '3 - 6 Months',
         });
       expect(mentorRes.status).toBe(403);
@@ -96,17 +125,22 @@ describe('Courses & Admin Bookings Management Integration Tests', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           id: uniqueCourseId,
-          title: 'Cyber Security & Ethical Hacking',
-          category: 'Coding & Programming',
-          shortDesc: 'Learn network protocols, security encryption, and ethical defense techniques.',
+          title: 'Test Robotics & Drones',
+          category: 'AI & Robotics',
+          shortDesc: 'Learn drone automation, sensor calibration, and flight physics.',
           ageGroup: 'Ages 12-18',
-          outcomes: 'Network security fundamentals,Encryption principles,Ethical defense tools',
+          outcomes: 'Drone flight dynamics,Sensor calibration,Autonomous navigation',
           duration: '3 - 6 Months',
           price: 150,
           currency: 'USD',
         });
       expect(adminRes.status).toBe(201);
       expect(adminRes.body.data.id).toBe(uniqueCourseId);
+
+      // 4. Clean up test-created course to prevent test pollution
+      await request(app)
+        .delete(`/api/courses/${uniqueCourseId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
     });
 
     it('PUT /api/courses/:id allows admin to update course details or toggle active status', async () => {
@@ -175,6 +209,27 @@ describe('Courses & Admin Bookings Management Integration Tests', () => {
       expect(res.body.data.course).toBe('Python Programming & AI Basics');
       expect(res.body.data.courseId).toBe('python-ai');
       expect(res.body.data.studentName).toBe('Aarav Verma');
+    });
+
+    it('creates trial booking with cyber-security course and stores canonical courseId', async () => {
+      const bookingPayload = {
+        parentName: 'Marcus Vance',
+        studentName: 'Leo Vance',
+        parentEmail: 'marcus.vance@example.com',
+        parentPhone: '+1 (555) 234-5678',
+        courseId: 'cyber-security',
+        parentTimeZone: 'America/New_York',
+        startAt: '2026-10-14 16:00',
+        verificationToken: 'test-verified-token',
+        captchaToken: 'test-captcha-token',
+      };
+
+      const res = await request(app).post('/api/bookings').send(bookingPayload);
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('success');
+      expect(res.body.data.course).toBe('Cyber Security & Ethical Hacking');
+      expect(res.body.data.courseId).toBe('cyber-security');
+      expect(res.body.data.studentName).toBe('Leo Vance');
     });
   });
 

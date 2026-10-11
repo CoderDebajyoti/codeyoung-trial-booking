@@ -327,8 +327,8 @@ describe('Codeyoung Trial Booking Frontend Comprehensive Tests', () => {
 
     const headers = await screen.findAllByText(/Explore Courses & Pricing/i);
     expect(headers.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Scratch & Game Development')).toBeInTheDocument();
-    expect(screen.getByText('Python Programming & AI Basics')).toBeInTheDocument();
+    expect(screen.getAllByText(/Scratch & Game Development/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/Python Programming & AI Basics/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/1 month/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/3 months/i).length).toBeGreaterThanOrEqual(1);
   });

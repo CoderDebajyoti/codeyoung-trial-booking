@@ -5,7 +5,7 @@ import { AuthModal } from '../src/components/AuthModal';
 import { ParentDetailsForm } from '../src/components/ParentDetailsForm';
 
 describe('PhoneCountryInput Component Tests', () => {
-  it('renders with default country India (+91, 🇮🇳)', () => {
+  it('renders with default country India (+91)', () => {
     const handleChange = vi.fn();
     render(
       <PhoneCountryInput
@@ -15,9 +15,9 @@ describe('PhoneCountryInput Component Tests', () => {
       />
     );
 
-    // Should display +91 and 🇮🇳 in closed control
+    // Should display +91 and India flag in closed control
     expect(screen.getByText('+91')).toBeInTheDocument();
-    expect(screen.getByText('🇮🇳')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /India/i })).toBeInTheDocument();
     expect(screen.getByDisplayValue('9876543210')).toBeInTheDocument();
   });
 
@@ -160,7 +160,7 @@ describe('ParentDetailsForm Component Tests', () => {
     expect(screen.getByLabelText(/Parent Full Name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Student Full Name/i)).toBeInTheDocument();
     expect(screen.getByText('+91')).toBeInTheDocument();
-    expect(screen.getByText('🇮🇳')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /India/i })).toBeInTheDocument();
   });
 
   it('displays trial limit banner when student has already used their trial class', async () => {

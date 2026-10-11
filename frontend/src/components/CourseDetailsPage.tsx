@@ -15,6 +15,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { CourseItem, PackageItem, api } from '../lib/api';
+import { CourseCardImage } from './CourseCardImage';
 
 interface CourseDetailsPageProps {
   courseId: string;
@@ -119,26 +120,26 @@ export function CourseDetailsPage({
       </div>
 
       {/* Hero Header Banner */}
-      <div className="bg-gradient-to-r from-[#FFD45A] via-[#FFC52E] to-[#FFB82E] p-6 sm:p-10 rounded-3xl border border-[#F7E4B6] shadow-card-warm text-[#713B18]">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div className="space-y-3 max-w-2xl">
+      <div className="bg-gradient-to-r from-[#FFD45A] via-[#FFC52E] to-[#FFB82E] p-6 sm:p-8 rounded-3xl border border-[#F7E4B6] shadow-card-warm text-[#713B18]">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
+          <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center gap-2">
-              <span className="px-3 py-1 rounded-full bg-white/50 text-[#713B18] text-xs font-extrabold border border-white/60">
+              <span className="px-3 py-1 rounded-full bg-white/60 text-[#713B18] text-xs font-extrabold border border-white/80 shadow-2xs">
                 {course.category}
               </span>
-              <span className="px-3 py-1 rounded-full bg-white/30 text-[#843B13] text-xs font-bold">
+              <span className="px-3 py-1 rounded-full bg-white/40 text-[#843B13] text-xs font-bold">
                 {course.ageGroup}
               </span>
+              {course.classLevel && (
+                <span className="px-3 py-1 rounded-full bg-white/30 text-[#843B13] text-xs font-bold">
+                  {course.classLevel}
+                </span>
+              )}
             </div>
 
-            <div className="flex items-center gap-4">
-              <span className="text-4xl p-2 rounded-2xl bg-white/60 border border-white/80 shrink-0">
-                {course.icon || '🚀'}
-              </span>
-              <h1 className="text-2xl sm:text-4xl font-heading font-extrabold text-[#713B18] tracking-tight leading-tight">
-                {course.title}
-              </h1>
-            </div>
+            <h1 className="text-2xl sm:text-4xl font-heading font-extrabold text-[#713B18] tracking-tight leading-tight">
+              {course.title}
+            </h1>
 
             <p className="text-sm sm:text-base text-[#843B13] font-semibold leading-relaxed">
               {course.description}
@@ -146,7 +147,7 @@ export function CourseDetailsPage({
           </div>
 
           {/* Quick Trial Booking Card */}
-          <div className="bg-white/95 backdrop-blur-md p-6 rounded-3xl border border-[#F7E4B6] shadow-md w-full md:w-72 space-y-4 shrink-0 text-center">
+          <div className="bg-white/95 backdrop-blur-md p-6 rounded-3xl border border-[#F7E4B6] shadow-md space-y-4 text-center">
             <span className="inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
               <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Free 30-Min 1:1 Trial
             </span>
@@ -168,6 +169,9 @@ export function CourseDetailsPage({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left 2 Columns: Curriculum & Learning Outcomes */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Visual Artwork / Fallback */}
+          <CourseCardImage course={course} variant="card" className="rounded-3xl border border-[#F7E4B6] shadow-card-warm" />
+
           {/* Key Course Specifications */}
           <div className="bg-white p-6 rounded-3xl border border-[#F7E4B6] shadow-card-warm">
             <h2 className="text-base font-heading font-extrabold text-[#713B18] mb-4 flex items-center gap-2">

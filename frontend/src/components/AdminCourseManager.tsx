@@ -12,6 +12,8 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { CourseItem, PackageItem, api, AuthUser } from '../lib/api';
+import { CourseCardImage } from './CourseCardImage';
+import { deduplicateCourses } from '../lib/courses';
 
 const CATEGORIES = [
   'Coding & Programming',
@@ -49,7 +51,7 @@ export function AdminCourseManager({ currentUser, onOpenLogin }: AdminCourseMana
     try {
       // Fetch all courses including inactive ones
       const data = await api.getCourses(undefined, true);
-      setCourses(data);
+      setCourses(deduplicateCourses(data));
     } catch (err: any) {
       setError(err?.message || 'Failed to load courses.');
     } finally {
@@ -320,7 +322,7 @@ export function AdminCourseManager({ currentUser, onOpenLogin }: AdminCourseMana
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {courses.map((course) => (
+          {deduplicateCourses(courses).map((course) => (
             <div
               key={course.id}
               className={`bg-white rounded-3xl border p-5 transition-all flex flex-col justify-between ${
@@ -332,9 +334,7 @@ export function AdminCourseManager({ currentUser, onOpenLogin }: AdminCourseMana
               <div>
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="flex items-center gap-2.5">
-                    <span className="text-2xl p-2 rounded-xl bg-[#FFF0D2] border border-[#F7E4B6]">
-                      {course.icon || '📘'}
-                    </span>
+                    <CourseCardImage course={course} variant="compact" />
                     <div>
                       <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-[#FFF0D2] text-[#843B13] border border-[#F7E4B6]">
                         {course.category}

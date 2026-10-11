@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { User, Mail, Globe, ArrowRight, ShieldCheck, Sparkles, CheckCircle2, KeyRound, Loader2, AlertTriangle, GraduationCap } from 'lucide-react';
 import { POPULAR_TIMEZONES } from '../lib/timezones';
 import { PhoneCountryInput } from './PhoneCountryInput';
+import { CourseCardImage } from './CourseCardImage';
 import { DEFAULT_COUNTRY } from '../lib/countries';
 import { api, CourseItem } from '../lib/api';
+import { CANONICAL_COURSES, deduplicateCourses } from '../lib/courses';
 
 export interface ParentFormData {
   parentName: string;
@@ -22,13 +24,6 @@ interface ParentDetailsFormProps {
   onSubmit: (data: ParentFormData) => void;
   preselectedCourseId?: string;
 }
-
-const FALLBACK_COURSES = [
-  { id: 'coding-game', title: 'Scratch & Game Development', ageGroup: 'Ages 6-10', icon: '🎮' },
-  { id: 'python-ai', title: 'Python Programming & AI Basics', ageGroup: 'Ages 10-15', icon: '🐍' },
-  { id: 'web-dev', title: 'Web Development (HTML, CSS & JS)', ageGroup: 'Ages 12-17', icon: '💻' },
-  { id: 'math-olympiad', title: 'Mathematics & Olympiad Logic', ageGroup: 'Ages 7-14', icon: '📐' },
-];
 
 export function ParentDetailsForm({ initialData, onSubmit, preselectedCourseId }: ParentDetailsFormProps) {
   const [formData, setFormData] = useState<ParentFormData>({
@@ -60,7 +55,8 @@ export function ParentDetailsForm({ initialData, onSubmit, preselectedCourseId }
     api.getCourses()
       .then((data) => {
         if (!isMounted) return;
-        const active = data.filter((c) => c.isActive);
+        const rawList = Array.isArray(data) && data.length > 0 ? data : CANONICAL_COURSES;
+        const active = deduplicateCourses(rawList.filter((c) => c.isActive));
         setCourses(active);
 
         // Preselect if specified by ID or match existing
@@ -69,12 +65,14 @@ export function ParentDetailsForm({ initialData, onSubmit, preselectedCourseId }
           if (match) {
             setFormData((prev) => ({ ...prev, course: match.title, courseId: match.id }));
           }
-        } else if (active.length > 0 && !formData.course) {
-          setFormData((prev) => ({ ...prev, course: active[0].title, courseId: active[0].id }));
+        } else if (active.length > 0 && (!formData.course || !formData.courseId)) {
+          const match = active.find((c) => c.title === formData.course || c.id === formData.courseId) || active[0];
+          setFormData((prev) => ({ ...prev, course: match.title, courseId: match.id }));
         }
       })
       .catch(() => {
-        // Use fallback courses on failure
+        const fallback = deduplicateCourses(CANONICAL_COURSES);
+        setCourses(fallback);
       });
     return () => {
       isMounted = false;
@@ -462,7 +460,7 @@ export function ParentDetailsForm({ initialData, onSubmit, preselectedCourseId }
             Select Course of Interest <span className="text-[#F28C28]">*</span>
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {(courses.length > 0 ? courses : FALLBACK_COURSES).map((c) => {
+            {deduplicateCourses(courses.length > 0 ? courses : CANONICAL_COURSES).map((c) => {
               const isSelected = formData.course === c.title || formData.courseId === c.id;
               return (
                 <div
@@ -471,20 +469,26 @@ export function ParentDetailsForm({ initialData, onSubmit, preselectedCourseId }
                     setFormData({ ...formData, course: c.title, courseId: c.id });
                     if (errors.course) setErrors({ ...errors, course: undefined });
                   }}
-                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer text-left flex items-start gap-3 ${
+                  className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer text-left flex items-center gap-3.5 ${
                     isSelected
                       ? 'border-[#F28C28] bg-[#FFF0D2] shadow-sm'
                       : 'border-[#F7E4B6] bg-white hover:bg-[#FFF8E8] hover:border-[#FFC52E]'
                   }`}
                 >
-                  <span className="text-2xl shrink-0 p-1 rounded-xl bg-white/80 border border-[#F7E4B6]">{c.icon || '🚀'}</span>
-                  <div>
-                    <div className="font-extrabold text-sm text-[#713B18] leading-tight">
+                  <CourseCardImage course={c} variant="compact" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-extrabold text-sm text-[#713B18] leading-tight truncate">
                       {c.title}
                     </div>
                     <div className="text-[11px] font-bold text-[#843B13] mt-1 flex items-center gap-1">
                       <Sparkles className="w-3 h-3 text-[#F28C28]" />
-                      {c.ageGroup || (c as any).age}
+                      <span>{c.ageGroup || (c as any).age}</span>
+                      {c.category && (
+                        <>
+                          <span>•</span>
+                          <span className="truncate">{c.category}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

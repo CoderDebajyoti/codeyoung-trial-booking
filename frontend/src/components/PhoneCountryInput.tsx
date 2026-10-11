@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Search } from 'lucide-react';
 import { COUNTRIES, Country, DEFAULT_COUNTRY } from '../lib/countries';
+import { CountryFlag } from './CountryFlag';
 
 interface PhoneCountryInputProps {
   phone: string;
@@ -116,12 +117,10 @@ export function PhoneCountryInput({
           aria-haspopup="listbox"
           aria-expanded={isOpen}
           aria-label={`Select country code, currently ${selectedCountry.name} ${selectedCountry.dialCode}`}
-          className="flex items-center gap-1.5 pl-3.5 pr-2 py-3 border-r border-[#F7E4B6] hover:bg-[#FFF0D2]/50 transition-colors rounded-l-2xl cursor-pointer shrink-0 outline-hidden"
+          className="flex items-center gap-2 pl-3.5 pr-2.5 py-3 border-r border-[#F7E4B6] hover:bg-[#FFF0D2]/50 transition-colors rounded-l-2xl cursor-pointer shrink-0 outline-hidden"
         >
-          <span className="text-xl leading-none" role="img" aria-label={selectedCountry.name}>
-            {selectedCountry.flag}
-          </span>
-          <span className="text-xs font-bold text-[#713B18]">{selectedCountry.dialCode}</span>
+          <CountryFlag code={selectedCountry.code} name={selectedCountry.name} className="w-5 h-3.5" />
+          <span className="text-xs font-bold text-[#713B18] font-mono">{selectedCountry.dialCode}</span>
           <ChevronDown
             className={`w-3.5 h-3.5 text-[#843B13] transition-transform duration-200 ${
               isOpen ? 'rotate-180' : ''
@@ -198,9 +197,7 @@ export function PhoneCountryInput({
                     }`}
                   >
                     <div className="flex items-center gap-2.5 truncate mr-2">
-                      <span className="text-lg leading-none" role="img" aria-label={country.name}>
-                        {country.flag}
-                      </span>
+                      <CountryFlag code={country.code} name={country.name} className="w-5 h-3.5" />
                       <span className="truncate">{country.name}</span>
                     </div>
                     <span className="text-[11px] font-bold text-[#843B13] shrink-0 font-mono">
